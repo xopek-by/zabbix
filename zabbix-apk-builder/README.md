@@ -1,76 +1,233 @@
 # Zabbix APK Builder
 
-Automated build system for creating Zabbix monitoring packages for Alpine Linux using Docker.
+Automated Alpine Linux package builder for Zabbix Agent and Proxy with CI/CD pipeline integration.
 
-## What it does
+## Features
 
-This project builds separate Alpine Linux packages for:
-- **zabbix-agent** - Monitoring agent for data collection
-- **zabbix-proxy** - Network monitoring proxy daemon
-- **zabbix** - Meta-package that installs both components
-
-Each package includes proper OpenRC init scripts and user management for production deployment.
+- 🔄 **Automatic Version Detection**: Monitors Zabbix releases using official Bitbucket API
+- 🏗️ **Docker-based Building**: Consistent, reproducible builds in isolated environment
+- 🚀 **CI/CD Pipeline**: Full automation from version detection to package deployment
+- 📦 **Multi-package Support**: Builds agent, proxy, and main packages
+- 🧪 **Automated Testing**: Tests package installation in Alpine containers
+- 📊 **Gitea Integration**: Publishes packages to your private Gitea repository
 
 ## Quick Start
 
+### 1. Repository Setup
+
 ```bash
-# Build packages
+# Clone this repository
+git clone <your-repo-url>
+cd zabbix-apk-builder
+
+# Make build script executable
+chmod +x build.sh setup-cicd.sh
+```
+
+### 2. Manual Build
+
+```bash
+# Build packages locally
 ./build.sh
 
-# Install on Alpine Linux
-apk add --allow-untrusted packages/zabbix-agent-*.apk
-apk add --allow-untrusted packages/zabbix-proxy-*.apk
+# Packages will be in ./packages/
+ls -la packages/
+```
 
-# Enable and start services
+### 3. CI/CD Setup
+
+```bash
+# Run the setup script
+./setup-cicd.sh
+
+# Follow the prompts to configure GitHub secrets
+```
+
+## Package Information
+
+### Built Packages
+
+1. **zabbix-agent** - Zabbix Agent only
+2. **zabbix-proxy** - Zabbix Proxy (without LDAP)
+3. **zabbix** - Main package with libraries
+
+### Current Version
+
+- **Zabbix Version**: 7.4.2
+- **Alpine Base**: 3.18
+- **Architecture**: x86_64
+
+### Dependencies Removed
+
+- LDAP support removed from proxy build
+- Simplified configuration for smaller footprint
+
+## CI/CD Pipeline
+
+### Automatic Triggers
+
+- **Daily**: Checks for new Zabbix versions at 6 AM UTC
+- **Push**: Builds when code changes in main/test branches
+- **Manual**: Force builds via GitHub Actions
+
+### Version Detection
+
+Uses Zabbix Bitbucket API:
+```bash
+https://git.zabbix.com/rest/api/1.0/projects/ZBX/repos/zabbix/tags
+```
+
+### Pipeline Jobs
+
+1. **check-version**: Detects new Zabbix releases
+2. **update-version**: Updates APKBUILD automatically  
+3. **build-packages**: Builds APK packages
+4. **publish-to-gitea**: Deploys to your repository
+5. **deploy-test**: Tests installation (test branch)
+
+## Configuration
+
+### GitHub Secrets Required
+
+```bash
+GITEA_SSH_KEY  # SSH private key for Gitea access
+```
+
+### File Structure
+
+```
+.
+├── APKBUILD                 # Alpine package definition
+├── build.sh                 # Build automation script
+├── Dockerfile              # Build environment
+├── .github/workflows/       # CI/CD pipeline
+├── packages/               # Built packages
+├── zabbix-agent.initd      # Agent init script
+├── zabbix-agent.confd      # Agent config
+├── zabbix-proxy.initd      # Proxy init script
+└── zabbix-proxy.confd      # Proxy config
+```
+
+## Usage
+
+### Install Packages
+
+```bash
+# Add repository
+echo "http://gitea-repo/mbuz/Zabbix/raw/branch/main/alpine/v3.18/main" >> /etc/apk/repositories
+
+# Update and install
+apk update
+apk add zabbix-agent
+
+# Enable and start
 rc-update add zabbix-agent default
 rc-service zabbix-agent start
 ```
 
-## Configuration
+### Configuration
 
-### Change Zabbix Version
-Edit `APKBUILD`:
 ```bash
-pkgver=7.4.2  # Change to desired version
+# Configure agent
+vim /etc/zabbix/zabbix_agentd.conf
+
+# Set server IP
+Server=your.zabbix.server
+
+# Restart service
+rc-service zabbix-agent restart
 ```
 
-### Change Architecture
-Edit `APKBUILD`:
+## Development
+
+### Local Testing
+
 ```bash
-arch="all"           # All architectures
-arch="x86_64"        # 64-bit Intel/AMD only
-arch="x86_64 aarch64"  # 64-bit Intel/AMD and ARM64
+# Test build locally
+./build.sh
+
+# Test in Docker
+docker run --rm -it \
+  -v $(pwd)/packages:/packages \
+  alpine:3.18 sh -c "
+    apk add --allow-untrusted /packages/zabbix-agent-*.apk
+    zabbix_agentd --version
+  "
 ```
 
-### Update Checksums
-After changing the version:
+### Branch Strategy
+
+- **main**: Production releases, auto-deployed
+- **test**: Testing and validation, no auto-deploy
+
+### Making Changes
+
+1. Create feature branch from `test`
+2. Test changes thoroughly
+3. Merge to `test` for CI validation
+4. Merge to `main` for production release
+
+## Troubleshooting
+
+### Build Issues
+
 ```bash
-# Manual approach
-wget https://cdn.zabbix.com/zabbix/sources/stable/X.Y/zabbix-X.Y.Z.tar.gz
-sha512sum zabbix-X.Y.Z.tar.gz  # Update sha512sums in APKBUILD
-# Or let the build system handle it
-./build.sh  # Will download and verify against official SHA256
+# Check build logs
+docker logs $(docker ps -l -q)
+
+# Manual build debug
+docker run -it --rm -v $(pwd):/build alpine:3.18 sh
+cd /build && ./build.sh
 ```
-sha512 is used per Alpine recommendation:
-https://wiki.alpinelinux.org/wiki/APKBUILD_Reference
-`New packages should use only sha512sums. Support for md5sums and sha1sums was dropped.`
 
-## Build Process
+### Version Detection
 
-1. **Docker Build**: Creates Alpine Linux build environment 
-2. **Download Sources**: `abuild checksum` downloads tarball and generates SHA512
-2. **Package Build**: Compiles and packages using Alpine's `abuild` system
-3. **Output**: Generated APK files in `packages/` directory
+```bash
+# Test API manually
+curl -s "https://git.zabbix.com/rest/api/1.0/projects/ZBX/repos/zabbix/tags?limit=100" | \
+  jq -r '.values[].displayId' | \
+  grep -E '^[0-9]+\.[0-9]+\.[0-9]+$' | \
+  sort -V | tail -1
+```
 
-## Requirements
+### CI/CD Issues
 
-- Docker
-- Internet connection (for source download and verification)
+1. Check GitHub Actions logs
+2. Verify SSH key permissions
+3. Test Gitea connectivity
+4. Validate APKBUILD syntax
 
-## Files
+## Documentation
 
-- `APKBUILD` - Alpine package definition
-- `build.sh` - Build automation script
-- `Dockerfile` - Build environment container
-- `zabbix-agent.*` - Agent service configuration files
-- `zabbix-proxy.*` - Proxy service configuration files
+- **[CI-CD-DOCS.md](CI-CD-DOCS.md)**: Comprehensive CI/CD documentation
+- **[setup-cicd.sh](setup-cicd.sh)**: Setup script for CI/CD configuration
+
+## Security
+
+- Uses SSH keys for Gitea access
+- Minimal package dependencies
+- Regular security updates via automated builds
+- No secrets stored in repository
+
+## Contributing
+
+1. Fork the repository
+2. Create feature branch
+3. Test changes in `test` branch
+4. Submit pull request to `main`
+
+## License
+
+This project follows the same license as Zabbix (GPL v2).
+
+## Support
+
+For issues:
+1. Check troubleshooting section
+2. Review CI/CD logs
+3. Test manual build process
+4. Check Zabbix API connectivity
+
+---
+
+**Built with ❤️ for Alpine Linux and Zabbix monitoring**

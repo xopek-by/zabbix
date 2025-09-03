@@ -1,0 +1,234 @@
+name: Zabbix APK Builder
+
+on:
+  # Manual trigger
+  workflow_dispatch:
+    inputs:
+      force_build:
+        description: 'Force build even if version unchanged'
+        required: false
+        default: 'false'
+        type: boolean
+
+  # Scheduled check for new versions (daily at 6 AM UTC)
+  schedule:
+    - cron: '0 6 * * *'
+
+  # Trigger on pushes to main/test branch
+  push:
+    branches: [ main, test ]
+    paths: [ 'APKBUILD', 'Dockerfile', 'build.sh', '*.initd', '*.confd' ]
+
+jobs:
+  check-version:
+    runs-on: ubuntu-latest
+    outputs:
+      should_build: ${{ steps.version-check.outputs.should_build }}
+      latest_version: ${{ steps.version-check.outputs.latest_version }}
+      current_version: ${{ steps.version-check.outputs.current_version }}
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      with:
+        token: ${{ secrets.GITHUB_TOKEN }}
+        fetch-depth: 0
+
+    - name: Check for new Zabbix version
+      id: version-check
+      run: |
+        # Get current version from APKBUILD
+        CURRENT_VERSION=$(grep '^pkgver=' APKBUILD | cut -d'=' -f2)
+        echo "current_version=$CURRENT_VERSION" >> $GITHUB_OUTPUT
+        echo "Current version: $CURRENT_VERSION"
+        
+        # Get latest version from Zabbix Bitbucket API (stable releases only)
+        LATEST_VERSION=$(curl -s "https://git.zabbix.com/rest/api/1.0/projects/ZBX/repos/zabbix/tags?limit=100" | \
+          jq -r '.values[].displayId' | \
+          grep -E '^[0-9]+\.[0-9]+\.[0-9]+$' | \
+          grep -v 'rc\|beta\|alpha' | \
+          sort -V | \
+          tail -1)
+        
+        echo "latest_version=$LATEST_VERSION" >> $GITHUB_OUTPUT
+        echo "Latest version: $LATEST_VERSION"
+        
+        # Determine if we should build
+        if [ "$CURRENT_VERSION" != "$LATEST_VERSION" ] || [ "${{ inputs.force_build }}" = "true" ]; then
+          echo "should_build=true" >> $GITHUB_OUTPUT
+          echo "Build required: Version changed or force build requested"
+        else
+          echo "should_build=false" >> $GITHUB_OUTPUT
+          echo "No build required: Version unchanged"
+        fi
+
+  update-version:
+    needs: check-version
+    if: needs.check-version.outputs.should_build == 'true'
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      with:
+        token: ${{ secrets.GITHUB_TOKEN }}
+        fetch-depth: 0
+
+    - name: Update APKBUILD version
+      run: |
+        LATEST_VERSION="${{ needs.check-version.outputs.latest_version }}"
+        CURRENT_VERSION="${{ needs.check-version.outputs.current_version }}"
+        
+        if [ "$CURRENT_VERSION" != "$LATEST_VERSION" ]; then
+          echo "Updating APKBUILD from $CURRENT_VERSION to $LATEST_VERSION"
+          
+          # Update pkgver
+          sed -i "s/^pkgver=.*/pkgver=$LATEST_VERSION/" APKBUILD
+          
+          # Reset pkgrel to 0 for new version
+          sed -i "s/^pkgrel=.*/pkgrel=0/" APKBUILD
+          
+          # Clear checksums (will be regenerated during build)
+          sed -i '/^sha512sums="/,/^"$/c\sha512sums="\nSKIP\nSKIP\nSKIP\nSKIP\nSKIP\n"' APKBUILD
+          
+          # Commit changes
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          git add APKBUILD
+          git commit -m "Update Zabbix to version $LATEST_VERSION" || exit 0
+          git push
+        fi
+
+  build-packages:
+    needs: [check-version, update-version]
+    if: needs.check-version.outputs.should_build == 'true'
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      with:
+        ref: ${{ github.ref }}
+        fetch-depth: 0
+
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+
+    - name: Build Zabbix packages
+      run: |
+        chmod +x build.sh
+        ./build.sh
+
+    - name: List built packages
+      run: |
+        echo "Built packages:"
+        ls -la packages/
+        
+        echo "Package sizes:"
+        du -h packages/*.apk
+
+    - name: Upload packages as artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: zabbix-apk-packages
+        path: packages/*.apk
+        retention-days: 30
+
+    - name: Create release
+      if: github.ref == 'refs/heads/main'
+      uses: softprops/action-gh-release@v1
+      with:
+        tag_name: "v${{ needs.check-version.outputs.latest_version }}"
+        name: "Zabbix ${{ needs.check-version.outputs.latest_version }} APK Packages"
+        body: |
+          Automated build of Zabbix ${{ needs.check-version.outputs.latest_version }} packages for Alpine Linux.
+          
+          ## Packages
+          - `zabbix-agent-${{ needs.check-version.outputs.latest_version }}-r0.apk` - Monitoring agent
+          - `zabbix-proxy-${{ needs.check-version.outputs.latest_version }}-r0.apk` - Network proxy
+          - `zabbix-${{ needs.check-version.outputs.latest_version }}-r0.apk` - Meta package
+          
+          ## Installation
+          ```bash
+          apk add --allow-untrusted zabbix-agent-${{ needs.check-version.outputs.latest_version }}-r0.apk
+          rc-update add zabbix-agent default
+          rc-service zabbix-agent start
+          ```
+        files: packages/*.apk
+        draft: false
+        prerelease: false
+
+  publish-to-gitea:
+    needs: [check-version, build-packages]
+    if: needs.check-version.outputs.should_build == 'true'
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Download packages
+      uses: actions/download-artifact@v4
+      with:
+        name: zabbix-apk-packages
+        path: packages/
+
+    - name: Setup SSH for Gitea
+      run: |
+        mkdir -p ~/.ssh
+        echo "${{ secrets.GITEA_SSH_KEY }}" > ~/.ssh/id_rsa
+        chmod 600 ~/.ssh/id_rsa
+        ssh-keyscan -H gitea-repo >> ~/.ssh/known_hosts 2>/dev/null || true
+
+    - name: Publish to Gitea repository
+      run: |
+        # Clone or update the packages repository
+        git clone git@gitea-repo:mbuz/Zabbix.git gitea-repo || true
+        cd gitea-repo
+        
+        # Create packages directory structure
+        mkdir -p alpine/v3.18/main/x86_64
+        
+        # Copy new packages
+        cp ../packages/*.apk alpine/v3.18/main/x86_64/
+        
+        # Update package index (simplified)
+        cd alpine/v3.18/main/x86_64
+        ls *.apk > PACKAGES.txt
+        
+        # Commit and push
+        git config --local user.email "action@github.com"
+        git config --local user.name "GitHub Action"
+        git add .
+        git commit -m "Add Zabbix ${{ needs.check-version.outputs.latest_version }} packages" || exit 0
+        git push
+
+  deploy-test:
+    needs: [check-version, build-packages]
+    if: needs.check-version.outputs.should_build == 'true' && github.ref == 'refs/heads/test'
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Download packages
+      uses: actions/download-artifact@v4
+      with:
+        name: zabbix-apk-packages
+        path: packages/
+
+    - name: Test deployment in Alpine container
+      run: |
+        # Test agent package
+        docker run --rm -v $PWD/packages:/packages alpine:latest sh -c "
+          apk add --allow-untrusted /packages/zabbix-agent-*.apk
+          which zabbix_agentd
+          zabbix_agentd --version
+        "
+        
+        # Test proxy package  
+        docker run --rm -v $PWD/packages:/packages alpine:latest sh -c "
+          apk add --allow-untrusted /packages/zabbix-proxy-*.apk
+          which zabbix_proxy
+          zabbix_proxy --version
+        "
+        
+        echo "✅ Package deployment test passed"
