@@ -5,7 +5,6 @@ on:
   # Trigger on pushes to main/test branch
   push:
     branches: [ main, test ]
-    paths: [ 'zabbix-apk-builder/**' ]
 
   # Scheduled check for new versions (daily at 6 AM UTC)
   schedule:
