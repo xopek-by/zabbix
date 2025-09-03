@@ -134,29 +134,7 @@ jobs:
         path: packages/*.apk
         retention-days: 30
 
-    - name: Create release
-      if: github.ref == 'refs/heads/main'
-      uses: softprops/action-gh-release@v1
-      with:
-        tag_name: "v${{ needs.check-version.outputs.latest_version }}"
-        name: "Zabbix ${{ needs.check-version.outputs.latest_version }} APK Packages"
-        body: |
-          Automated build of Zabbix ${{ needs.check-version.outputs.latest_version }} packages for Alpine Linux.
-          
-          ## Packages
-          - `zabbix-agent-${{ needs.check-version.outputs.latest_version }}-r0.apk` - Monitoring agent
-          - `zabbix-proxy-${{ needs.check-version.outputs.latest_version }}-r0.apk` - Network proxy
-          - `zabbix-${{ needs.check-version.outputs.latest_version }}-r0.apk` - Meta package
-          
-          ## Installation
-          ```bash
-          apk add --allow-untrusted zabbix-agent-${{ needs.check-version.outputs.latest_version }}-r0.apk
-          rc-update add zabbix-agent default
-          rc-service zabbix-agent start
-          ```
-        files: packages/*.apk
-        draft: false
-        prerelease: false
+    
 
   publish-to-gitea:
     needs: [check-version, build-packages]

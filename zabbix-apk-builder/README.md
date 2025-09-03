@@ -1,3 +1,4 @@
+<!-- Test commit to trigger CI/CD -->
 # Zabbix APK Builder
 
 Automated Alpine Linux package builder for Zabbix Agent and Proxy with CI/CD pipeline integration.
@@ -186,7 +187,8 @@ cd /build && ./build.sh
 # Test API manually
 curl -s "https://git.zabbix.com/rest/api/1.0/projects/ZBX/repos/zabbix/tags?limit=100" | \
   jq -r '.values[].displayId' | \
-  grep -E '^[0-9]+\.[0-9]+\.[0-9]+$' | \
+  grep -E '^[0-9]+\.[0-9]+\.[0-9]+
+ | \
   sort -V | tail -1
 ```
 
