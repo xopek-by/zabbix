@@ -17,9 +17,20 @@ on:
   # Trigger on pushes to main/test branch
   push:
     branches: [ main, test ]
-    paths: [ 'APKBUILD', 'Dockerfile', 'build.sh', '*.initd', '*.confd' ]
+    paths: [ 'zabbix-apk-builder/APKBUILD', 'zabbix-apk-builder/Dockerfile', 'zabbix-apk-builder/build.sh', 'zabbix-apk-builder/*.initd', 'zabbix-apk-builder/*.confd' ]
 
 jobs:
+  # Simple test job to verify workflow triggers
+  test-trigger:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Test workflow trigger
+      run: |
+        echo "🎉 Build workflow was triggered!"
+        echo "Event: ${{ github.event_name }}"
+        echo "Branch: ${{ github.ref }}"
+        echo "Repository: ${{ github.repository }}"
+
   check-version:
     runs-on: ubuntu-latest
     outputs:
@@ -42,7 +53,7 @@ jobs:
         
         # Get current version from APKBUILD (correct path)
         CURRENT_VERSION=$(grep '^pkgver=' zabbix-apk-builder/APKBUILD | cut -d'=' -f2)
-        echo "current_version=$CURRENT_VERSION" >> $GITEA_OUTPUT
+        echo "current_version=$CURRENT_VERSION" >> $GITHUB_OUTPUT
         echo "Current version: $CURRENT_VERSION"
         
         # Get latest version from Zabbix Bitbucket API (stable releases only)
@@ -53,21 +64,21 @@ jobs:
           sort -V | \
           tail -1)
         
-        echo "latest_version=$LATEST_VERSION" >> $GITEA_OUTPUT
+        echo "latest_version=$LATEST_VERSION" >> $GITHUB_OUTPUT
         echo "Latest version: $LATEST_VERSION"
         
         # Determine if we should build
         if [ "$CURRENT_VERSION" != "$LATEST_VERSION" ] || [ "${{ inputs.force_build }}" = "true" ]; then
-          echo "should_build=true" >> $GITEA_OUTPUT
+          echo "should_build=true" >> $GITHUB_OUTPUT
           echo "Build required: Version changed or force build requested"
         else
-          echo "should_build=false" >> $GITEA_OUTPUT
+          echo "should_build=false" >> $GITHUB_OUTPUT
           echo "No build required: Version unchanged"
         fi
 
   update-version:
     needs: check-version
-    if: needs.check-version.outputs.should_build == 'true'
+    if: needs.check-version.outputs.should_build == 'true' && needs.check-version.outputs.current_version != needs.check-version.outputs.latest_version
     runs-on: ubuntu-latest
     
     steps:
@@ -103,7 +114,7 @@ jobs:
         fi
 
   build-packages:
-    needs: [check-version, update-version]
+    needs: [check-version]
     if: needs.check-version.outputs.should_build == 'true'
     runs-on: ubuntu-latest
     
@@ -111,8 +122,10 @@ jobs:
     - name: Checkout repository
       uses: actions/checkout@v4
       with:
-        ref: ${{ gitea.ref }}
+        token: ${{ secrets.GITEA_TOKEN }}
         fetch-depth: 0
+        # Pull latest changes in case version was updated
+        ref: ${{ github.ref }}
 
     - name: Set up Docker Buildx
       uses: docker/setup-buildx-action@v3
@@ -160,7 +173,8 @@ jobs:
         mkdir -p ~/.ssh
         echo "${{ secrets.GITEA_SSH_KEY }}" > ~/.ssh/id_rsa
         chmod 600 ~/.ssh/id_rsa
-        ssh-keyscan -H gitea-repo >> ~/.ssh/known_hosts 2>/dev/null || true
+        # Add your Gitea server to known_hosts - replace with your actual Gitea server hostname
+        ssh-keyscan -H gitea-repo >> ~/.ssh/known_hosts 2>/dev/null || echo "gitea-repo ssh-rsa YOUR_HOST_KEY" >> ~/.ssh/known_hosts
 
     - name: Publish to Gitea repository
       run: |
@@ -187,7 +201,7 @@ jobs:
 
   deploy-test:
     needs: [check-version, build-packages]
-    if: needs.check-version.outputs.should_build == 'true' && gitea.ref == 'refs/heads/test'
+    if: needs.check-version.outputs.should_build == 'true' && github.ref == 'refs/heads/test'
     runs-on: ubuntu-latest
     
     steps:
