@@ -1,5 +1,4 @@
 name: Zabbix APK Builder
-run-name: ${{ gitea.actor }} is building Zabbix APK packages 🚀
 
 on:
   # Trigger on pushes to main/test branch
@@ -26,6 +25,8 @@ jobs:
     - name: Check for new Zabbix version
       id: version-check
       run: |
+        set -euo pipefail
+        
         # Install jq for JSON parsing
         sudo apt-get update && sudo apt-get install -y jq
         
@@ -45,7 +46,7 @@ jobs:
         echo "latest_version=$LATEST_VERSION" >> $GITHUB_OUTPUT
         echo "Latest version: $LATEST_VERSION"
         
-        # Determine if we should build (remove workflow_dispatch reference)
+        # Determine if we should build
         if [ "$CURRENT_VERSION" != "$LATEST_VERSION" ]; then
           echo "should_build=true" >> $GITHUB_OUTPUT
           echo "Build required: Version changed"
@@ -63,10 +64,12 @@ jobs:
     - name: Checkout repository
       uses: actions/checkout@v4
       with:
-        token: ${{ secrets.GITEA_TOKEN }}
+        token: ${{ secrets.ACCESS_TOKEN }}
 
     - name: Update APKBUILD version
       run: |
+        set -euo pipefail
+        
         LATEST_VERSION="${{ needs.check-version.outputs.latest_version }}"
         CURRENT_VERSION="${{ needs.check-version.outputs.current_version }}"
         
@@ -104,12 +107,16 @@ jobs:
 
     - name: Build Zabbix packages
       run: |
+        set -euo pipefail
+        
         cd zabbix-apk-builder
         chmod +x build.sh
         ./build.sh
 
     - name: List built packages
       run: |
+        set -euo pipefail
+        
         echo "Built packages:"
         ls -la zabbix-apk-builder/packages/
         
@@ -137,6 +144,8 @@ jobs:
 
     - name: Test deployment in Alpine container
       run: |
+        set -euo pipefail
+        
         echo "Testing package installation..."
         
         # Test agent package
