@@ -5,7 +5,6 @@ on:
   push:
     branches: [ main, test ]
     paths: [ 'zabbix-apk-builder/**' ]
-    if: "!contains(gitea.event.head_commit.message, '[ci skip]')"
 
   # Scheduled check for new versions (daily at 6 AM UTC)
   schedule:
@@ -89,7 +88,7 @@ jobs:
         git config --local user.email "action@gitea.com"
         git config --local user.name "Gitea Action"
         git add zabbix-apk-builder/APKBUILD
-        git commit -m "CHANGE: Update Zabbix to version $LATEST_VERSION [ci skip]" || exit 0
+        git commit -m "CHANGE: Update Zabbix to version $LATEST_VERSION" || exit 0
         git push
 
   build-packages:
