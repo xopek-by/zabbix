@@ -1,0 +1,25 @@
+name: Zabbix APK Builder No Dispatch
+run-name: ${{ gitea.actor }} is building Zabbix APK packages 🚀
+
+on:
+  # Trigger on pushes to main/test branch
+  push:
+    branches: [ main, test ]
+    paths: [ 'zabbix-apk-builder/**' ]
+
+jobs:
+  test-trigger:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Test workflow trigger
+      run: |
+        echo "🎉 Build workflow was triggered!"
+        echo "Event: ${{ gitea.event_name }}"
+        echo "Branch: ${{ gitea.ref }}"
+        echo "Repository: ${{ gitea.repository }}"
+    - name: Check out repository code
+      uses: actions/checkout@v4
+    - name: List files in the repository
+      run: |
+        ls ${{ gitea.workspace }}
+        ls ${{ gitea.workspace }}/zabbix-apk-builder/
