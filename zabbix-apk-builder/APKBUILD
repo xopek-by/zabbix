@@ -1,5 +1,5 @@
-# Contributor: Maks <maks@onet.com>
-# Maintainer: Maks <maks@onet.com>
+# Contributor: Maksym Buz <maksym.buz@zabbix.com>
+# Maintainer: Maksym Buz <maksym.buz@zabbix.com>
 pkgname=zabbix
 pkgver=7.4.2
 pkgrel=0
