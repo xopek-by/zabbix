@@ -1,0 +1,42 @@
+#!/sbin/openrc-run
+# Copyright 1999-2023 Gentoo Authors
+# Distributed under the terms of the GNU General Public License v2
+
+extra_commands="checkconfig"
+extra_started_commands="reload"
+
+depend() {
+	need net
+	use logger
+}
+
+: ${ZABBIX_AGENT_USER:=zabbix}
+: ${ZABBIX_AGENT_GROUP:=zabbix}
+: ${ZABBIX_AGENT_CONFIG:=/etc/zabbix/zabbix_agentd.conf}
+: ${ZABBIX_AGENT_PID:=/var/run/zabbix/zabbix_agentd.pid}
+
+command="/usr/sbin/zabbix_agentd"
+command_args="-c ${ZABBIX_AGENT_CONFIG}"
+command_user="${ZABBIX_AGENT_USER}:${ZABBIX_AGENT_GROUP}"
+pidfile="${ZABBIX_AGENT_PID}"
+required_files="${ZABBIX_AGENT_CONFIG}"
+
+checkconfig() {
+	if [ ! -f "${ZABBIX_AGENT_CONFIG}" ] ; then
+		eerror "You need to create appropriate config file."
+		return 1
+	fi
+}
+
+start_pre() {
+	checkconfig || return $?
+	
+	checkpath --directory --owner ${ZABBIX_AGENT_USER}:${ZABBIX_AGENT_GROUP} --mode 0755 \
+		$(dirname ${ZABBIX_AGENT_PID}) /var/log/zabbix
+}
+
+reload() {
+	ebegin "Reloading ${SVCNAME}"
+	start-stop-daemon --signal HUP --pidfile "${pidfile}"
+	eend $?
+}

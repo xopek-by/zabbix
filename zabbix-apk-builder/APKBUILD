@@ -1,0 +1,148 @@
+# Contributor: Maks <maks@onet.com>
+# Maintainer: Maks <maks@onet.com>
+pkgname=zabbix
+pkgver=7.4.2
+pkgrel=0
+pkgdesc="Enterprise-class open source distributed monitoring solution"
+url="https://www.zabbix.com/"
+arch="all"
+license="AGPL-3.0-or-later"
+options="!check"  # No test suite available
+makedepends="
+	autoconf
+	automake
+	curl-dev
+	libevent-dev
+	libxml2-dev
+	libtool
+	linux-headers
+	net-snmp-dev
+	openssl-dev
+	pcre2-dev
+	sqlite-dev
+	unixodbc-dev
+	libssh2-dev
+	"
+pkgusers="zabbix"
+pkggroups="zabbix"
+install="$pkgname-agent.pre-install $pkgname-proxy.pre-install"
+subpackages="$pkgname-agent $pkgname-proxy"
+source="https://cdn.zabbix.com/zabbix/sources/stable/${pkgver%.*}/zabbix-$pkgver.tar.gz
+	zabbix-agent.initd
+	zabbix-agent.confd
+	zabbix-proxy.initd
+	zabbix-proxy.confd
+	"
+builddir="$srcdir/$pkgname-$pkgver"
+
+prepare() {
+	default_prepare
+	
+	# Regenerate autotools files
+	cd "$builddir"
+	autoreconf -fiv
+	
+	# Create separate build directories for agent and proxy
+	cp -r "$builddir" "$srcdir/zabbix-agent-$pkgver"
+	cp -r "$builddir" "$srcdir/zabbix-proxy-$pkgver"
+}
+
+build() {
+	# Build agent with minimal dependencies
+	cd "$srcdir/zabbix-agent-$pkgver"
+	./configure \
+		--build=$CBUILD \
+		--host=$CHOST \
+		--prefix=/usr \
+		--sysconfdir=/etc/zabbix \
+		--localstatedir=/var \
+		--enable-agent \
+		--with-libcurl \
+		--with-net-snmp \
+		--with-openssl \
+		--with-libpcre2
+	make
+
+	# Build proxy with database support
+	cd "$srcdir/zabbix-proxy-$pkgver"
+	./configure \
+		--build=$CBUILD \
+		--host=$CHOST \
+		--prefix=/usr \
+		--sysconfdir=/etc/zabbix \
+		--localstatedir=/var \
+		--enable-proxy \
+		--with-libcurl \
+		--with-net-snmp \
+		--with-openssl \
+		--with-libpcre2 \
+		--with-sqlite3 \
+		--with-unixodbc \
+		--with-ssh2 \
+		--with-libxml2 \
+		--with-libevent
+	make
+}
+
+package() {
+	# Meta-package - intentionally empty
+	# Users install zabbix-agent and/or zabbix-proxy directly
+	mkdir -p "$pkgdir"
+}
+
+agent() {
+	pkgdesc="Zabbix monitoring agent"
+	
+	cd "$srcdir/zabbix-agent-$pkgver"
+	
+	# Install agent binary
+	install -Dm755 src/zabbix_agent/zabbix_agentd \
+		"$subpkgdir"/usr/sbin/zabbix_agentd
+
+	
+	# Install agent configuration
+	install -Dm644 conf/zabbix_agentd.conf \
+		"$subpkgdir"/etc/zabbix/zabbix_agentd.conf
+	
+	# Install init script and conf
+	install -Dm755 "$srcdir"/zabbix-agent.initd \
+		"$subpkgdir"/etc/init.d/zabbix-agent
+	install -Dm644 "$srcdir"/zabbix-agent.confd \
+		"$subpkgdir"/etc/conf.d/zabbix-agent
+	
+	# Create directories
+	install -dm755 "$subpkgdir"/var/log/zabbix
+	install -dm755 "$subpkgdir"/var/run/zabbix
+}
+
+proxy() {
+	pkgdesc="Zabbix network monitoring proxy daemon"
+	
+	cd "$srcdir/zabbix-proxy-$pkgver"
+	
+	# Install proxy binary
+	install -Dm755 src/zabbix_proxy/zabbix_proxy \
+		"$subpkgdir"/usr/sbin/zabbix_proxy
+	
+	# Install proxy configuration
+	install -Dm644 conf/zabbix_proxy.conf \
+		"$subpkgdir"/etc/zabbix/zabbix_proxy.conf
+	
+	# Install init script and conf
+	install -Dm755 "$srcdir"/zabbix-proxy.initd \
+		"$subpkgdir"/etc/init.d/zabbix-proxy
+	install -Dm644 "$srcdir"/zabbix-proxy.confd \
+		"$subpkgdir"/etc/conf.d/zabbix-proxy
+	
+	# Create directories
+	install -dm755 "$subpkgdir"/var/log/zabbix
+	install -dm755 "$subpkgdir"/var/run/zabbix
+}
+
+sha512sums="
+3bf1f915c2cd5a59f1dd3afc10dd1a6e596840e576013839d6eae057cd327893f87cc5cec1d32b6a8ca8bd00735c0070327084aae01dc8d3399202f5a3e365c1  zabbix-7.4.2.tar.gz
+SKIP
+SKIP
+SKIP
+SKIP
+"

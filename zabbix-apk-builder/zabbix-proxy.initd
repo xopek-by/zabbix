@@ -1,0 +1,43 @@
+#!/sbin/openrc-run
+# Copyright 1999-2023 Gentoo Authors
+# Distributed under the terms of the GNU General Public License v2
+
+extra_commands="checkconfig"
+extra_started_commands="reload"
+
+depend() {
+	need net
+	use logger
+	after postgresql mysql
+}
+
+: ${ZABBIX_PROXY_USER:=zabbix}
+: ${ZABBIX_PROXY_GROUP:=zabbix}
+: ${ZABBIX_PROXY_CONFIG:=/etc/zabbix/zabbix_proxy.conf}
+: ${ZABBIX_PROXY_PID:=/var/run/zabbix/zabbix_proxy.pid}
+
+command="/usr/sbin/zabbix_proxy"
+command_args="-c ${ZABBIX_PROXY_CONFIG}"
+command_user="${ZABBIX_PROXY_USER}:${ZABBIX_PROXY_GROUP}"
+pidfile="${ZABBIX_PROXY_PID}"
+required_files="${ZABBIX_PROXY_CONFIG}"
+
+checkconfig() {
+	if [ ! -f "${ZABBIX_PROXY_CONFIG}" ] ; then
+		eerror "You need to create appropriate config file."
+		return 1
+	fi
+}
+
+start_pre() {
+	checkconfig || return $?
+	
+	checkpath --directory --owner ${ZABBIX_PROXY_USER}:${ZABBIX_PROXY_GROUP} --mode 0755 \
+		$(dirname ${ZABBIX_PROXY_PID}) /var/log/zabbix
+}
+
+reload() {
+	ebegin "Reloading ${SVCNAME}"
+	start-stop-daemon --signal HUP --pidfile "${pidfile}"
+	eend $?
+}
