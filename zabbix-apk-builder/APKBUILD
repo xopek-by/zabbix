@@ -6,7 +6,7 @@ pkgrel=0
 pkgdesc="Enterprise-class open source distributed monitoring solution"
 url="https://www.zabbix.com/"
 arch="all"
-license="AGPL-3.0-or-later"
+license="AGPL-3.0-only"
 options="!check"  # No test suite available
 makedepends="
 	autoconf
