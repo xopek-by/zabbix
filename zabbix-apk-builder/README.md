@@ -7,9 +7,9 @@ Automated Alpine Linux package builder for Zabbix Agent and Proxy with CI/CD pip
 - 🔄 **Automatic Version Detection**: Monitors Zabbix releases using official Bitbucket API
 - 🏗️ **Docker-based Building**: Consistent, reproducible builds in isolated environment
 - 🚀 **CI/CD Pipeline**: Full automation from version detection to package deployment
-- 📦 **Multi-package Support**: Builds agent, proxy, and main packages
+- 📦 **Multi-package Support**: Builds agent and proxy packages
 - 🧪 **Automated Testing**: Tests package installation in Alpine containers
-- 📊 **Gitea Integration**: Publishes packages to your private Gitea repository
+- 📊 **Gitea Integration**: Publishes packages to Gitea repository
 
 ## Quick Start
 
@@ -17,11 +17,11 @@ Automated Alpine Linux package builder for Zabbix Agent and Proxy with CI/CD pip
 
 ```bash
 # Clone this repository
-git clone <your-repo-url>
+git clone https://git.mbuz.uk/mbuz/Zabbix.git
 cd zabbix-apk-builder
 
 # Make build script executable
-chmod +x build.sh setup-cicd.sh
+chmod +x build.sh
 ```
 
 ### 2. Manual Build
@@ -48,19 +48,14 @@ ls -la packages/
 ### Built Packages
 
 1. **zabbix-agent** - Zabbix Agent only
-2. **zabbix-proxy** - Zabbix Proxy (without LDAP)
-3. **zabbix** - Main package with libraries
+2. **zabbix-proxy** - Zabbix Proxy
+3. **zabbix** - Meta package
 
 ### Current Version
 
 - **Zabbix Version**: 7.4.2
-- **Alpine Base**: 3.18
-- **Architecture**: x86_64
-
-### Dependencies Removed
-
-- LDAP support removed from proxy build
-- Simplified configuration for smaller footprint
+- **Alpine Base**: latest
+- **Architecture**: all
 
 ## CI/CD Pipeline
 
@@ -68,7 +63,7 @@ ls -la packages/
 
 - **Daily**: Checks for new Zabbix versions at 6 AM UTC
 - **Push**: Builds when code changes in main/test branches
-- **Manual**: Force builds via GitHub Actions
+- **Manual**: Force builds via Gitea Actions
 
 ### Version Detection
 
@@ -97,15 +92,17 @@ GITEA_SSH_KEY  # SSH private key for Gitea access
 
 ```
 .
-├── APKBUILD                 # Alpine package definition
-├── build.sh                 # Build automation script
-├── Dockerfile              # Build environment
-├── .github/workflows/       # CI/CD pipeline
-├── packages/               # Built packages
-├── zabbix-agent.initd      # Agent init script
-├── zabbix-agent.confd      # Agent config
-├── zabbix-proxy.initd      # Proxy init script
-└── zabbix-proxy.confd      # Proxy config
+└── zabbix-git
+    └── zabbix-apk-builder
+        ├── .gitea/workflows   # Workflows for Gitea actions
+        ├── .gitignore         # Ignore files 
+        ├── APKBUILD           # APKBUILD file for Zabbix
+        ├── Dockerfile         # Dockerfile for building packages
+        ├── README.md          # Project description
+        ├── build.sh           # Script for manual builds
+        ├── packages/          # Directory for built packages
+        ├── zabbix-agent.*     # Agent configuration files
+        └── zabbix-proxy.*     # Proxy configuration files
 ```
 
 ## Usage
@@ -191,45 +188,8 @@ curl -s "https://git.zabbix.com/rest/api/1.0/projects/ZBX/repos/zabbix/tags?limi
   sort -V | tail -1
 ```
 
-### CI/CD Issues
-
-1. Check GitHub Actions logs
-2. Verify SSH key permissions
-3. Test Gitea connectivity
-4. Validate APKBUILD syntax
-
-## Documentation
-
-- **[CI-CD-DOCS.md](CI-CD-DOCS.md)**: Comprehensive CI/CD documentation
-- **[setup-cicd.sh](setup-cicd.sh)**: Setup script for CI/CD configuration
-
-## Security
-
-- Uses SSH keys for Gitea access
-- Minimal package dependencies
-- Regular security updates via automated builds
-- No secrets stored in repository
-
-## Contributing
-
-1. Fork the repository
-2. Create feature branch
-3. Test changes in `test` branch
-4. Submit pull request to `main`
-
 ## License
 
-This project follows the same license as Zabbix (GPL v2).
-
-## Support
-
-For issues:
-1. Check troubleshooting section
-2. Review CI/CD logs
-3. Test manual build process
-4. Check Zabbix API connectivity
+This project follows the same license as Zabbix (AGPLv3).
 
 ---
-
-**Built with ❤️ for Alpine Linux and Zabbix monitoring**
-# Workflow test - Wed Sep  3 19:02:19 CEST 2025
