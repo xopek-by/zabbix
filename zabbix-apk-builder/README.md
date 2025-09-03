@@ -1,4 +1,3 @@
-<!-- Test commit to trigger CI/CD -->
 # Zabbix APK Builder
 
 Automated Alpine Linux package builder for Zabbix Agent and Proxy with CI/CD pipeline integration.
