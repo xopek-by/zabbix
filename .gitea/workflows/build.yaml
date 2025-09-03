@@ -56,7 +56,7 @@ jobs:
         fi
 
   update-version:
-    needs: check-version
+    needs: [check-version]
     if: needs.check-version.outputs.should_build == 'true' && needs.check-version.outputs.current_version != needs.check-version.outputs.latest_version
     runs-on: ubuntu-latest
     
@@ -88,11 +88,11 @@ jobs:
         git config --local user.email "action@gitea.com"
         git config --local user.name "Gitea Action"
         git add zabbix-apk-builder/APKBUILD
-        git commit -m "Update Zabbix to version $LATEST_VERSION" || exit 0
+        git commit -m "CHANGE: Update Zabbix to version $LATEST_VERSION" || exit 0
         git push
 
   build-packages:
-    needs: [check-version]
+    needs: [update-version] 
     if: needs.check-version.outputs.should_build == 'true'
     runs-on: ubuntu-latest
     
@@ -100,7 +100,7 @@ jobs:
     - name: Checkout repository
       uses: actions/checkout@v4
       with:
-        ref: ${{ gitea.ref }}
+        ref: ${{ gitea.head_ref }}
 
     - name: Set up Docker Buildx
       uses: docker/setup-buildx-action@v3
@@ -131,7 +131,7 @@ jobs:
         retention-days: 30
 
   deploy-test:
-    needs: [check-version, build-packages]
+    needs: [build-packages] 
     if: needs.check-version.outputs.should_build == 'true' && gitea.ref == 'refs/heads/test'
     runs-on: ubuntu-latest
     
