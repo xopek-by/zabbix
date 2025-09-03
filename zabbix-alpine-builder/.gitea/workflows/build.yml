@@ -1,0 +1,207 @@
+name: Build Zabbix APK on New Release
+
+# Trigger the workflow on schedule (daily at 2 AM UTC) and manual dispatch
+on:
+  schedule:
+    - cron: '0 2 * * *'  # Daily at 2 AM UTC
+  workflow_dispatch:     # Allow manual triggering
+
+jobs:
+  build:
+    name: Build Zabbix APK Packages
+    runs-on: ubuntu-latest
+    container:
+      image: alpine:latest
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          fetch-depth: 0
+
+      - name: Install dependencies
+        run: |
+          apk update
+          apk add --no-cache \
+            alpine-sdk \
+            git \
+            curl \
+            bash \
+            grep \
+            sed \
+            coreutils
+
+      - name: Check for new Zabbix version
+        id: version_check
+        run: |
+          echo "Checking for new Zabbix 7.4.x versions..."
+          
+          # Install jq for JSON parsing
+          apk add --no-cache jq
+          
+          # Fetch the latest stable version from Zabbix Bitbucket API (stable releases only)
+          LATEST_VERSION=$(curl -s "https://git.zabbix.com/rest/api/1.0/projects/ZBX/repos/zabbix/tags?limit=100" | \
+            jq -r '.values[].displayId' | \
+            grep -E '^[0-9]+\.[0-9]+\.[0-9]+$' | \
+            grep -v 'rc\|beta\|alpha' | \
+            sort -V | \
+            tail -1)
+          
+          # Validate version format
+          if [[ ! "$LATEST_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Error: Invalid version format detected: $LATEST_VERSION"
+            exit 1
+          fi
+          
+          echo "Latest upstream version: $LATEST_VERSION"
+          
+          # Extract current version from APKBUILD
+          CURRENT_VERSION=$(grep '^pkgver=' zabbix/APKBUILD | cut -d'=' -f2)
+          echo "Current package version: $CURRENT_VERSION"
+          
+          # Compare versions
+          if [ "$LATEST_VERSION" = "$CURRENT_VERSION" ]; then
+            echo "No new version available. Current version $CURRENT_VERSION is up to date."
+            echo "new_version_available=false" >> $GITHUB_OUTPUT
+          else
+            echo "New version available: $LATEST_VERSION"
+            echo "new_version_available=true" >> $GITHUB_OUTPUT
+            echo "latest_version=$LATEST_VERSION" >> $GITHUB_OUTPUT
+            echo "current_version=$CURRENT_VERSION" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Update APKBUILD with new version
+        if: steps.version_check.outputs.new_version_available == 'true'
+        run: |
+          echo "Updating APKBUILD with version ${{ steps.version_check.outputs.latest_version }}"
+          
+          # Update package version in APKBUILD
+          sed -i "s/^pkgver=.*/pkgver=${{ steps.version_check.outputs.latest_version }}/" zabbix/APKBUILD
+          
+          # Reset package release number for new version
+          sed -i "s/^pkgrel=.*/pkgrel=0/" zabbix/APKBUILD
+          
+          echo "APKBUILD updated successfully"
+
+      - name: Create build user and setup environment
+        if: steps.version_check.outputs.new_version_available == 'true'
+        run: |
+          echo "Setting up build environment..."
+          
+          # Create build user
+          adduser -D -s /bin/bash builder
+          addgroup builder abuild
+          
+          # Setup abuild directories
+          mkdir -p /home/builder/.abuild
+          chown -R builder:builder /home/builder
+          
+          # Generate signing key for builder user
+          su - builder -c "abuild-keygen -a -n"
+          
+          # Copy project files to builder's workspace
+          cp -r /github/workspace /home/builder/workspace
+          chown -R builder:builder /home/builder/workspace
+
+      - name: Update checksums
+        if: steps.version_check.outputs.new_version_available == 'true'
+        run: |
+          echo "Updating checksums for new version..."
+          cd /home/builder/workspace/zabbix
+          
+          # First, fetch the source to calculate checksums
+          su - builder -c "cd /home/builder/workspace/zabbix && abuild fetch"
+          
+          # Update checksums in APKBUILD
+          su - builder -c "cd /home/builder/workspace/zabbix && abuild checksum"
+          
+          # Copy updated APKBUILD back to workspace
+          cp /home/builder/workspace/zabbix/APKBUILD /github/workspace/zabbix/APKBUILD
+          
+          echo "Checksums updated successfully"
+
+      - name: Build packages
+        if: steps.version_check.outputs.new_version_available == 'true'
+        run: |
+          echo "Building Zabbix packages..."
+          cd /home/builder/workspace
+          su - builder -c "cd /home/builder/workspace && ./build.sh"
+
+      - name: Collect build artifacts
+        if: steps.version_check.outputs.new_version_available == 'true'
+        run: |
+          echo "Collecting build artifacts..."
+          
+          # Create artifacts directory
+          mkdir -p /github/workspace/artifacts
+          
+          # Copy generated packages
+          if [ -d "/home/builder/packages" ]; then
+            find /home/builder/packages -name "zabbix*.apk" -type f -exec cp {} /github/workspace/artifacts/ \;
+            echo "Artifacts collected:"
+            ls -la /github/workspace/artifacts/
+          else
+            echo "No packages found in /home/builder/packages"
+          fi
+
+      - name: Archive build artifacts
+        if: steps.version_check.outputs.new_version_available == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: zabbix-apk-packages-${{ steps.version_check.outputs.latest_version }}
+          path: artifacts/*.apk
+          retention-days: 30
+
+      - name: Commit and push changes
+        if: steps.version_check.outputs.new_version_available == 'true'
+        run: |
+          echo "Committing and pushing changes..."
+          
+          # Configure git
+          git config --global user.name "Zabbix APK Builder Bot"
+          git config --global user.email "builder@example.com"
+          git config --global --add safe.directory /github/workspace
+          
+          # Add changes
+          git add zabbix/APKBUILD
+          
+          # Check if there are changes to commit
+          if git diff --staged --quiet; then
+            echo "No changes to commit"
+          else
+            # Commit changes
+            git commit -m "Update Zabbix to version ${{ steps.version_check.outputs.latest_version }}
+
+            - Updated pkgver from ${{ steps.version_check.outputs.current_version }} to ${{ steps.version_check.outputs.latest_version }}
+            - Reset pkgrel to 0 for new version
+            - Updated checksums for new source package
+            
+            Built packages:
+            - zabbix-agent-${{ steps.version_check.outputs.latest_version }}-r0.apk
+            - zabbix-proxy-${{ steps.version_check.outputs.latest_version }}-r0.apk"
+            
+            # Push to test branch (create if doesn't exist)
+            git checkout -B test
+            git push origin test --force-with-lease
+            
+            echo "Changes committed and pushed to test branch successfully"
+          fi
+
+      - name: Build summary
+        if: always()
+        run: |
+          echo "## Build Summary" >> $GITHUB_STEP_SUMMARY
+          
+          if [ "${{ steps.version_check.outputs.new_version_available }}" = "true" ]; then
+            echo "✅ **New version detected and built successfully**" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "- **Previous version:** ${{ steps.version_check.outputs.current_version }}" >> $GITHUB_STEP_SUMMARY
+            echo "- **New version:** ${{ steps.version_check.outputs.latest_version }}" >> $GITHUB_STEP_SUMMARY
+            echo "- **Build artifacts:** Available in workflow artifacts" >> $GITHUB_STEP_SUMMARY
+            echo "- **Repository:** Changes pushed to \`test\` branch" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "ℹ️ **No new version available**" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "The current version is up to date with the latest upstream release." >> $GITHUB_STEP_SUMMARY
+          fi
