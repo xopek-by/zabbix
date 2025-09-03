@@ -5,7 +5,6 @@ on:
   push:
     branches: [ main, test ]
     paths: [ 'zabbix-apk-builder/**' ]
-    if: "!contains(gitea.event.head_commit.message, '[ci skip]')"
 
   # Scheduled check for new versions (daily at 6 AM UTC)
   schedule:
@@ -14,6 +13,8 @@ on:
 jobs:
   check-version:
     runs-on: ubuntu-latest
+    # Skip the execution if the commit message contains [ci skip]
+    if: ${{ !contains(gitea.event.head_commit.message, '[ci skip]') }}
     outputs:
       should_build: ${{ steps.version-check.outputs.should_build }}
       latest_version: ${{ steps.version-check.outputs.latest_version }}
