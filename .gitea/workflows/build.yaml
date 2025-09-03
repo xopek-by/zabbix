@@ -31,15 +31,18 @@ jobs:
     - name: Checkout repository
       uses: actions/checkout@v4
       with:
-        token: ${{ secrets.GITHUB_TOKEN }}
+        token: ${{ secrets.GITEA_TOKEN }}
         fetch-depth: 0
 
     - name: Check for new Zabbix version
       id: version-check
       run: |
-        # Get current version from APKBUILD
-        CURRENT_VERSION=$(grep '^pkgver=' APKBUILD | cut -d'=' -f2)
-        echo "current_version=$CURRENT_VERSION" >> $GITHUB_OUTPUT
+        # Install jq for JSON parsing
+        sudo apt-get update && sudo apt-get install -y jq
+        
+        # Get current version from APKBUILD (correct path)
+        CURRENT_VERSION=$(grep '^pkgver=' zabbix-apk-builder/APKBUILD | cut -d'=' -f2)
+        echo "current_version=$CURRENT_VERSION" >> $GITEA_OUTPUT
         echo "Current version: $CURRENT_VERSION"
         
         # Get latest version from Zabbix Bitbucket API (stable releases only)
@@ -50,15 +53,15 @@ jobs:
           sort -V | \
           tail -1)
         
-        echo "latest_version=$LATEST_VERSION" >> $GITHUB_OUTPUT
+        echo "latest_version=$LATEST_VERSION" >> $GITEA_OUTPUT
         echo "Latest version: $LATEST_VERSION"
         
         # Determine if we should build
         if [ "$CURRENT_VERSION" != "$LATEST_VERSION" ] || [ "${{ inputs.force_build }}" = "true" ]; then
-          echo "should_build=true" >> $GITHUB_OUTPUT
+          echo "should_build=true" >> $GITEA_OUTPUT
           echo "Build required: Version changed or force build requested"
         else
-          echo "should_build=false" >> $GITHUB_OUTPUT
+          echo "should_build=false" >> $GITEA_OUTPUT
           echo "No build required: Version unchanged"
         fi
 
@@ -71,7 +74,7 @@ jobs:
     - name: Checkout repository
       uses: actions/checkout@v4
       with:
-        token: ${{ secrets.GITHUB_TOKEN }}
+        token: ${{ secrets.GITEA_TOKEN }}
         fetch-depth: 0
 
     - name: Update APKBUILD version
@@ -82,19 +85,19 @@ jobs:
         if [ "$CURRENT_VERSION" != "$LATEST_VERSION" ]; then
           echo "Updating APKBUILD from $CURRENT_VERSION to $LATEST_VERSION"
           
-          # Update pkgver
-          sed -i "s/^pkgver=.*/pkgver=$LATEST_VERSION/" APKBUILD
+          # Update pkgver (correct path)
+          sed -i "s/^pkgver=.*/pkgver=$LATEST_VERSION/" zabbix-apk-builder/APKBUILD
           
           # Reset pkgrel to 0 for new version
-          sed -i "s/^pkgrel=.*/pkgrel=0/" APKBUILD
+          sed -i "s/^pkgrel=.*/pkgrel=0/" zabbix-apk-builder/APKBUILD
           
           # Clear checksums (will be regenerated during build)
-          sed -i '/^sha512sums="/,/^"$/c\sha512sums="\nSKIP\nSKIP\nSKIP\nSKIP\nSKIP\n"' APKBUILD
+          sed -i 's/^sha512sums=.*/sha512sums="SKIP"/' zabbix-apk-builder/APKBUILD
           
           # Commit changes
-          git config --local user.email "action@github.com"
-          git config --local user.name "GitHub Action"
-          git add APKBUILD
+          git config --local user.email "action@gitea.com"
+          git config --local user.name "Gitea Action"
+          git add zabbix-apk-builder/APKBUILD
           git commit -m "Update Zabbix to version $LATEST_VERSION" || exit 0
           git push
         fi
@@ -108,7 +111,7 @@ jobs:
     - name: Checkout repository
       uses: actions/checkout@v4
       with:
-        ref: ${{ github.ref }}
+        ref: ${{ gitea.ref }}
         fetch-depth: 0
 
     - name: Set up Docker Buildx
@@ -116,22 +119,23 @@ jobs:
 
     - name: Build Zabbix packages
       run: |
+        cd zabbix-apk-builder
         chmod +x build.sh
         ./build.sh
 
     - name: List built packages
       run: |
         echo "Built packages:"
-        ls -la packages/
+        ls -la zabbix-apk-builder/packages/
         
         echo "Package sizes:"
-        du -h packages/*.apk
+        du -h zabbix-apk-builder/packages/*.apk
 
     - name: Upload packages as artifacts
       uses: actions/upload-artifact@v4
       with:
         name: zabbix-apk-packages
-        path: packages/*.apk
+        path: zabbix-apk-builder/packages/*.apk
         retention-days: 30
 
     
@@ -175,15 +179,15 @@ jobs:
         ls *.apk > PACKAGES.txt
         
         # Commit and push
-        git config --local user.email "action@github.com"
-        git config --local user.name "GitHub Action"
+        git config --local user.email "action@gitea.com"
+        git config --local user.name "Gitea Action"
         git add .
         git commit -m "Add Zabbix ${{ needs.check-version.outputs.latest_version }} packages" || exit 0
         git push
 
   deploy-test:
     needs: [check-version, build-packages]
-    if: needs.check-version.outputs.should_build == 'true' && github.ref == 'refs/heads/test'
+    if: needs.check-version.outputs.should_build == 'true' && gitea.ref == 'refs/heads/test'
     runs-on: ubuntu-latest
     
     steps:
