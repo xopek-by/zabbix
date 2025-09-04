@@ -38,3 +38,4 @@ echo "Build completed successfully!"
 echo "To install packages:"
 echo "  apk add --allow-untrusted $OUTPUT_DIR/zabbix-agent-*.apk"
 echo "  apk add --allow-untrusted $OUTPUT_DIR/zabbix-proxy-*.apk"
+
