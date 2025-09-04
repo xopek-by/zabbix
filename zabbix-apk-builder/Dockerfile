@@ -51,7 +51,13 @@ sudo -u builder sh -c "
 
 echo "Copying packages to output..."
 find /home/builder/packages -name '*.apk' -exec cp {} /output/ \;
-chmod 644 /output/*.apk
+
+# Make files readable and writable by everyone (fixes permission issues)
+chmod 666 /output/*.apk 2>/dev/null || true
+
+# Also try changing ownership to a generic user ID that should work
+# Use UID 1000 which is common for CI runners
+chown 1000:1000 /output/*.apk 2>/dev/null || true
 
 echo "Build complete! Packages:"
 ls -la /output/
