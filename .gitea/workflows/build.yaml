@@ -200,12 +200,10 @@ jobs:
         find packages -name "*.apk" -exec bash -c 'echo "Package: $(basename "$1")"; echo "Size: $(du -h "$1" | cut -f1)"; echo "---"' _ {} \;
 
     - name: Upload packages as artifacts
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v3
       with:
         name: zabbix-apk-packages-${{ gitea.run_number }}
-        path: |
-          zabbix-apk-builder/packages/**/*.apk
-          !zabbix-apk-builder/packages/**/APKINDEX.tar.gz
+        path: zabbix-apk-builder/packages/**/*.apk
         retention-days: 30
         if-no-files-found: error
 
@@ -216,9 +214,9 @@ jobs:
     
     steps:
     - name: Download packages
-      uses: actions/download-artifact@v4
+      uses: actions/download-artifact@v3
       with:
-        name: zabbix-apk-packages
+        name: zabbix-apk-packages-${{ gitea.run_number }}
         path: packages/
 
     - name: Test deployment in Alpine container
