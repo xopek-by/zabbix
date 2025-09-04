@@ -245,12 +245,17 @@ jobs:
         if [[ -f "$AGENT_PKG" ]]; then
           echo "Testing agent package at: $AGENT_PKG"
           echo "File size: $(du -h "$AGENT_PKG")"
-          docker run --rm -v "$(realpath "$AGENT_PKG"):/package.apk" alpine:latest sh -c "
-            ls -la /package.apk
-            apk add --allow-untrusted /package.apk
+          
+          # Create container, copy package, install and test
+          CONTAINER_ID=$(docker run -d alpine:latest sleep 30)
+          docker cp "$AGENT_PKG" "$CONTAINER_ID:/$(basename "$AGENT_PKG")"
+          docker exec "$CONTAINER_ID" sh -c "
+            ls -la /$(basename "$AGENT_PKG")
+            apk add --allow-untrusted /$(basename "$AGENT_PKG")
             which zabbix_agentd
             zabbix_agentd --version
           " && echo "✅ Agent test passed" || echo "❌ Agent test failed"
+          docker rm -f "$CONTAINER_ID" >/dev/null
         else
           echo "⚠️ Agent package not found at $AGENT_PKG"
         fi
@@ -259,12 +264,17 @@ jobs:
         if [[ -f "$PROXY_PKG" ]]; then
           echo "Testing proxy package at: $PROXY_PKG"
           echo "File size: $(du -h "$PROXY_PKG")"
-          docker run --rm -v "$(realpath "$PROXY_PKG"):/package.apk" alpine:latest sh -c "
-            ls -la /package.apk
-            apk add --allow-untrusted /package.apk
+          
+          # Create container, copy package, install and test
+          CONTAINER_ID=$(docker run -d alpine:latest sleep 30)
+          docker cp "$PROXY_PKG" "$CONTAINER_ID:/$(basename "$PROXY_PKG")"
+          docker exec "$CONTAINER_ID" sh -c "
+            ls -la /$(basename "$PROXY_PKG")
+            apk add --allow-untrusted /$(basename "$PROXY_PKG")
             which zabbix_proxy
             zabbix_proxy --version
           " && echo "✅ Proxy test passed" || echo "❌ Proxy test failed"
+          docker rm -f "$CONTAINER_ID" >/dev/null
         else
           echo "⚠️ Proxy package not found at $PROXY_PKG"
         fi
