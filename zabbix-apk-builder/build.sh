@@ -5,7 +5,7 @@ set -e
 # Configuration
 PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 IMAGE_NAME="zabbix-apk-builder"
-CONTAINER_NAME="zabbix-build-$$"
+CONTAINER_NAME="zabbix-build-$"
 OUTPUT_DIR="$PROJECT_DIR/packages"
 
 echo "=== Zabbix APK Builder ==="
