@@ -32,10 +32,17 @@ echo "Running package build..."
 docker run --rm \
     --name "$CONTAINER_NAME" \
     -v "$OUTPUT_DIR:/output" \
+    --user builder \
+    --workdir /home/builder/zabbix \
     "$IMAGE_NAME" \
     sh -c "
         set -e
         echo 'Starting package build...'
+
+        # Debug info
+        whoami
+        pwd
+        ls -la APKBUILD
         
         # Generate checksums for APKBUILD
         echo 'Generating checksums for APKBUILD...'
