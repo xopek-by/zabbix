@@ -5,7 +5,9 @@ set -e
 # Configuration
 PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 IMAGE_NAME="zabbix-apk-builder"
-CONTAINER_NAME="zabbix-build-$$"
+# Use a unique ID from the CI environment if available, otherwise fall back to PID
+UNIQUE_ID="${CI_RUN_ID:-$$}"
+CONTAINER_NAME="zabbix-build-${UNIQUE_ID}"
 OUTPUT_DIR="$PROJECT_DIR/packages"
 
 echo "=== Zabbix APK Builder ==="
