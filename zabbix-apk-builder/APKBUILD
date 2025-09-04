@@ -139,10 +139,6 @@ proxy() {
 	install -dm755 "$subpkgdir"/var/run/zabbix
 }
 
-sha512sums="SKIP"
-3bf1f915c2cd5a59f1dd3afc10dd1a6e596840e576013839d6eae057cd327893f87cc5cec1d32b6a8ca8bd00735c0070327084aae01dc8d3399202f5a3e365c1  zabbix-7.4.2.tar.gz
-SKIP
-SKIP
-SKIP
+sha512sums="
 SKIP
 "

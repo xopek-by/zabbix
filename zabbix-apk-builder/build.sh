@@ -3,7 +3,7 @@
 set -e
 
 # Configuration
-PROJECT_DIR="$(pwd)"
+PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 IMAGE_NAME="zabbix-apk-builder"
 CONTAINER_NAME="zabbix-build-$$"
 OUTPUT_DIR="$PROJECT_DIR/packages"
@@ -32,20 +32,12 @@ echo "Running package build..."
 docker run --rm \
     --name "$CONTAINER_NAME" \
     -v "$OUTPUT_DIR:/output" \
-    --user builder \
-    --workdir /home/builder/zabbix \
     "$IMAGE_NAME" \
     sh -c "
         set -e
         echo 'Starting package build...'
-
-        # Debug info
-        whoami
-        pwd
-        ls -la APKBUILD
         
         # Generate checksums for APKBUILD
-        echo 'Generating checksums for APKBUILD...'
         abuild checksum
         
         # Build packages
