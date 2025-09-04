@@ -32,21 +32,8 @@ echo "Running package build..."
 docker run --rm \
     --name "$CONTAINER_NAME" \
     -v "$OUTPUT_DIR:/output" \
-    "$IMAGE_NAME" \
-    sh -c "
-        set -e
-        echo 'Starting package build...'
-        
-        # Generate checksums for APKBUILD
-        abuild checksum
-        
-        # Build packages
-        abuild -r
-        
-        # Copy packages to output
-        echo 'Copying packages to output directory...'
-        find /home/builder/packages -name '*.apk' -exec cp {} /output/ \;
-    "
+    "$IMAGE_NAME"
+
 echo "Build completed successfully!"
 echo "To install packages:"
 echo "  apk add --allow-untrusted $OUTPUT_DIR/zabbix-agent-*.apk"

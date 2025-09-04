@@ -36,5 +36,28 @@ COPY --chown=builder:builder . /home/builder/zabbix/
 
 WORKDIR /home/builder/zabbix
 
+# Create build script
+USER root
+RUN cat > /usr/local/bin/build-and-copy.sh << 'EOF'
+#!/bin/sh
+set -e
+
+echo "Building packages as builder user..."
+sudo -u builder sh -c "
+    cd /home/builder/zabbix
+    abuild checksum
+    abuild -r
+"
+
+echo "Copying packages to output..."
+find /home/builder/packages -name '*.apk' -exec cp {} /output/ \;
+chmod 644 /output/*.apk
+
+echo "Build complete! Packages:"
+ls -la /output/
+EOF
+
+RUN chmod +x /usr/local/bin/build-and-copy.sh
+
 # Set build command
-CMD ["abuild", "-r"]
+CMD ["/usr/local/bin/build-and-copy.sh"]

@@ -9,6 +9,7 @@ src/
 
 # Backup files
 *.backup
+*.bak
 *~
 
 # OS files
