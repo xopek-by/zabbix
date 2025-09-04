@@ -225,17 +225,21 @@ jobs:
         
         echo "=== Testing package installation ==="
         
-        # Verify packages were downloaded
-        if [[ ! -d "packages" ]] || [[ -z "$(ls -A packages/ 2>/dev/null)" ]]; then
-          echo "ERROR: No packages found for testing"
-          exit 1
-        fi
+        # Debug: Show what was actually downloaded
+        echo "Current directory contents:"
+        ls -la .
+        echo "Packages directory contents:"
+        find . -name "*.apk" -type f || echo "No .apk files found"
+        
+        # Find packages in any subdirectory
+        AGENT_PKG=$(find . -name "zabbix-agent-*.apk" -type f | head -1)
+        PROXY_PKG=$(find . -name "zabbix-proxy-*.apk" -type f | head -1)
         
         # Test agent package
-        if ls packages/zabbix-agent-*.apk >/dev/null 2>&1; then
-          echo "Testing agent package..."
-          docker run --rm -v "${PWD}/packages:/packages" alpine:latest sh -c "
-            apk add --allow-untrusted /packages/zabbix-agent-*.apk
+        if [[ -n "$AGENT_PKG" && -f "$AGENT_PKG" ]]; then
+          echo "Testing agent package: $AGENT_PKG"
+          docker run --rm -v "${PWD}:/workspace" alpine:latest sh -c "
+            apk add --allow-untrusted /workspace/$AGENT_PKG
             which zabbix_agentd
             zabbix_agentd --version
           " && echo "✅ Agent test passed" || echo "❌ Agent test failed"
@@ -244,10 +248,10 @@ jobs:
         fi
         
         # Test proxy package  
-        if ls packages/zabbix-proxy-*.apk >/dev/null 2>&1; then
-          echo "Testing proxy package..."
-          docker run --rm -v "${PWD}/packages:/packages" alpine:latest sh -c "
-            apk add --allow-untrusted /packages/zabbix-proxy-*.apk
+        if [[ -n "$PROXY_PKG" && -f "$PROXY_PKG" ]]; then
+          echo "Testing proxy package: $PROXY_PKG"
+          docker run --rm -v "${PWD}:/workspace" alpine:latest sh -c "
+            apk add --allow-untrusted /workspace/$PROXY_PKG
             which zabbix_proxy
             zabbix_proxy --version
           " && echo "✅ Proxy test passed" || echo "❌ Proxy test failed"

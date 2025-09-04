@@ -142,3 +142,5 @@ proxy() {
 sha512sums="
 SKIP
 "
+
+# --- TEST ---
