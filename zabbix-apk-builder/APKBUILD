@@ -138,7 +138,11 @@ proxy() {
 	install -dm755 "$subpkgdir"/var/log/zabbix
 	install -dm755 "$subpkgdir"/var/run/zabbix
 }
-# it should be in a few lines	
+
 sha512sums="
+SKIP
+SKIP
+SKIP
+SKIP
 SKIP
 "

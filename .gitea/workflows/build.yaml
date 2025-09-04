@@ -226,37 +226,35 @@ jobs:
         echo "=== Testing package installation ==="
         
         # Debug: Show what was actually downloaded
-        echo "Current directory contents:"
-        ls -la .
-        echo "Packages directory contents:"
-        find . -name "*.apk" -type f || echo "No .apk files found"
+        echo "Downloaded packages:"
+        ls -la packages/
         
-        # Find packages in any subdirectory
-        AGENT_PKG=$(find . -name "zabbix-agent-*.apk" -type f | head -1)
-        PROXY_PKG=$(find . -name "zabbix-proxy-*.apk" -type f | head -1)
+        # Use known paths - packages are uploaded from zabbix-apk-builder/packages/**/*.apk
+        # and downloaded to packages/, so they should be in packages/builder/x86_64/
+        PACKAGE_DIR="packages/builder/x86_64"
         
         # Test agent package
-        if [[ -n "$AGENT_PKG" && -f "$AGENT_PKG" ]]; then
-          echo "Testing agent package: $AGENT_PKG"
-          docker run --rm -v "${PWD}:/workspace" alpine:latest sh -c "
-            apk add --allow-untrusted /workspace/$AGENT_PKG
+        if [[ -f "$PACKAGE_DIR/zabbix-agent-7.4.2-r0.apk" ]]; then
+          echo "Testing agent package..."
+          docker run --rm -v "$(pwd)/$PACKAGE_DIR/zabbix-agent-7.4.2-r0.apk:/package.apk" alpine:latest sh -c "
+            apk add --allow-untrusted /package.apk
             which zabbix_agentd
             zabbix_agentd --version
           " && echo "✅ Agent test passed" || echo "❌ Agent test failed"
         else
-          echo "⚠️ No agent package found"
+          echo "⚠️ Agent package not found at $PACKAGE_DIR/zabbix-agent-7.4.2-r0.apk"
         fi
         
         # Test proxy package  
-        if [[ -n "$PROXY_PKG" && -f "$PROXY_PKG" ]]; then
-          echo "Testing proxy package: $PROXY_PKG"
-          docker run --rm -v "${PWD}:/workspace" alpine:latest sh -c "
-            apk add --allow-untrusted /workspace/$PROXY_PKG
+        if [[ -f "$PACKAGE_DIR/zabbix-proxy-7.4.2-r0.apk" ]]; then
+          echo "Testing proxy package..."
+          docker run --rm -v "$(pwd)/$PACKAGE_DIR/zabbix-proxy-7.4.2-r0.apk:/package.apk" alpine:latest sh -c "
+            apk add --allow-untrusted /package.apk
             which zabbix_proxy
             zabbix_proxy --version
           " && echo "✅ Proxy test passed" || echo "❌ Proxy test failed"
         else
-          echo "⚠️ No proxy package found"
+          echo "⚠️ Proxy package not found at $PACKAGE_DIR/zabbix-proxy-7.4.2-r0.apk"
         fi
         
         echo "✅ Package deployment test completed"
