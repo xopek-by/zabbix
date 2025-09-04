@@ -19,6 +19,7 @@ jobs:
       should_build: ${{ steps.version-check.outputs.should_build }}
       latest_version: ${{ steps.version-check.outputs.latest_version }}
       current_version: ${{ steps.version-check.outputs.current_version }}
+      is_push_trigger: ${{ steps.version-check.outputs.is_push_trigger }}
     
     steps:
     - name: Checkout repository
@@ -29,13 +30,22 @@ jobs:
       run: |
         set -euo pipefail
         
-        # Install jq for JSON parsing
-        sudo apt-get update && sudo apt-get install -y jq
+        # Install jq for JSON parsing (remove sudo for container environment)
+        apt-get update && apt-get install -y jq
+        
+        # Detect trigger type
+        if [[ "${{ gitea.event_name }}" == "push" ]]; then
+          echo "is_push_trigger=true" >> "${GITHUB_OUTPUT}"
+          echo "Triggered by push event - force build"
+        else
+          echo "is_push_trigger=false" >> "${GITHUB_OUTPUT}"
+          echo "Triggered by schedule - check version"
+        fi
         
         # Get current version from APKBUILD
         CURRENT_VERSION=$(grep '^pkgver=' zabbix-apk-builder/APKBUILD | cut -d'=' -f2)
-        echo "current_version=$CURRENT_VERSION" >> $GITHUB_OUTPUT
-        echo "Current version: $CURRENT_VERSION"
+        echo "current_version=${CURRENT_VERSION}" >> "${GITHUB_OUTPUT}"
+        echo "Current version: ${CURRENT_VERSION}"
         
         # Get latest version from Zabbix API (stable releases only)
         LATEST_VERSION=$(curl -s "https://git.zabbix.com/rest/api/1.0/projects/ZBX/repos/zabbix/tags?limit=100" | \
@@ -45,21 +55,28 @@ jobs:
           sort -V | \
           tail -1)
         
-        echo "latest_version=$LATEST_VERSION" >> $GITHUB_OUTPUT
-        echo "Latest version: $LATEST_VERSION"
+        echo "latest_version=${LATEST_VERSION}" >> "${GITHUB_OUTPUT}"
+        echo "Latest version: ${LATEST_VERSION}"
         
-        # Determine if we should build
-        if [ "$CURRENT_VERSION" != "$LATEST_VERSION" ]; then
-          echo "should_build=true" >> $GITHUB_OUTPUT
-          echo "Build required: Version changed"
+        # Determine if we should build based on trigger type
+        if [[ "${{ gitea.event_name }}" == "push" ]]; then
+          # Push trigger: always build to test changes
+          echo "should_build=true" >> "${GITHUB_OUTPUT}"
+          echo "Build required: Push trigger detected"
+        elif [[ "${CURRENT_VERSION}" != "${LATEST_VERSION}" ]]; then
+          # Schedule trigger: only build if version changed
+          echo "should_build=true" >> "${GITHUB_OUTPUT}"
+          echo "Build required: New version ${LATEST_VERSION} available"
         else
-          echo "should_build=false" >> $GITHUB_OUTPUT
-          echo "No build required: Version unchanged"
+          # Schedule trigger: no new version
+          echo "should_build=false" >> "${GITHUB_OUTPUT}"
+          echo "No build required: Version ${CURRENT_VERSION} is current"
         fi
 
   update-version:
-    needs: [check-version]
-    if: needs.check-version.outputs.should_build == 'true' && needs.check-version.outputs.current_version != needs.check-version.outputs.latest_version
+    needs: check-version
+    # Only update version during scheduled runs when new version is available
+    if: ${{ needs.check-version.outputs.should_build == 'true' && needs.check-version.outputs.is_push_trigger == 'false' && needs.check-version.outputs.current_version != needs.check-version.outputs.latest_version }}
     runs-on: ubuntu-latest
     
     steps:
@@ -75,10 +92,10 @@ jobs:
         LATEST_VERSION="${{ needs.check-version.outputs.latest_version }}"
         CURRENT_VERSION="${{ needs.check-version.outputs.current_version }}"
         
-        echo "Updating APKBUILD from $CURRENT_VERSION to $LATEST_VERSION"
+        echo "Updating APKBUILD from ${CURRENT_VERSION} to ${LATEST_VERSION}"
         
         # Update pkgver
-        sed -i "s/^pkgver=.*/pkgver=$LATEST_VERSION/" zabbix-apk-builder/APKBUILD
+        sed -i "s/^pkgver=.*/pkgver=${LATEST_VERSION}/" zabbix-apk-builder/APKBUILD
         
         # Reset pkgrel to 0 for new version
         sed -i "s/^pkgrel=.*/pkgrel=0/" zabbix-apk-builder/APKBUILD
@@ -86,23 +103,49 @@ jobs:
         # Clear checksums (will be regenerated during build)
         sed -i 's/^sha512sums=.*/sha512sums="SKIP"/' zabbix-apk-builder/APKBUILD
         
-        # Commit changes
+        # Commit changes with [ci skip] to prevent recursive triggers
         git config --local user.email "action@gitea.com"
         git config --local user.name "Gitea Action"
         git add zabbix-apk-builder/APKBUILD
-        git commit -m "CHANGE: Update Zabbix to version $LATEST_VERSION [ci skip]" || exit 0
+        git commit -m "AUTO: Update Zabbix to version ${LATEST_VERSION} [ci skip]" || exit 0
         git push
 
   build-packages:
-    needs: [update-version] 
-    if: needs.check-version.outputs.should_build == 'true'
+    # Build packages after version update (for scheduled runs) or immediately (for push runs)
+    needs: [check-version, update-version]
+    # Run if should_build=true AND either update-version ran successfully OR it was skipped due to push trigger
+    if: ${{ needs.check-version.outputs.should_build == 'true' && (success() || needs.check-version.outputs.is_push_trigger == 'true') }}
     runs-on: ubuntu-latest
     
     steps:
     - name: Checkout repository
       uses: actions/checkout@v4
       with:
-        ref: ${{ gitea.head_ref }}
+        # Use token to ensure we get the latest version if it was updated
+        token: ${{ secrets.ACCESS_TOKEN }}
+        ref: ${{ gitea.ref }}
+
+    - name: Pull latest changes if version was updated
+      run: |
+        set -euo pipefail
+        
+        # Pull any version updates that may have been committed
+        if [[ "${{ needs.check-version.outputs.is_push_trigger }}" == "false" ]]; then
+          echo "Scheduled build - pulling latest changes"
+          git pull origin "${GITEA_REF_NAME:-main}" || true
+        else
+          echo "Push build - using current ref"
+        fi
+
+    - name: Verify build environment
+      run: |
+        set -euo pipefail
+        
+        echo "=== Build Environment ==="
+        echo "Trigger type: ${{ gitea.event_name }}"
+        echo "Current branch: $(git branch --show-current)"
+        echo "APKBUILD version: $(grep '^pkgver=' zabbix-apk-builder/APKBUILD | cut -d'=' -f2)"
+        echo "Target version: ${{ needs.check-version.outputs.latest_version }}"
 
     - name: Set up Docker Buildx
       uses: docker/setup-buildx-action@v3
@@ -119,11 +162,15 @@ jobs:
       run: |
         set -euo pipefail
         
-        echo "Built packages:"
-        ls -la zabbix-apk-builder/packages/
-        
-        echo "Package sizes:"
-        du -h zabbix-apk-builder/packages/*.apk || echo "No packages found"
+        echo "=== Built packages ==="
+        if [[ -d "zabbix-apk-builder/packages" ]]; then
+          ls -la zabbix-apk-builder/packages/
+          echo "=== Package sizes ==="
+          find zabbix-apk-builder/packages/ -name "*.apk" -exec du -h {} \;
+        else
+          echo "ERROR: No packages directory found"
+          exit 1
+        fi
 
     - name: Upload packages as artifacts
       uses: actions/upload-artifact@v4
@@ -133,8 +180,8 @@ jobs:
         retention-days: 30
 
   deploy-test:
-    needs: [build-packages] 
-    if: needs.check-version.outputs.should_build == 'true' && gitea.ref == 'refs/heads/test'
+    needs: [check-version, build-packages]
+    if: ${{ needs.check-version.outputs.should_build == 'true' && contains(gitea.ref, 'test') }}
     runs-on: ubuntu-latest
     
     steps:
@@ -148,20 +195,36 @@ jobs:
       run: |
         set -euo pipefail
         
-        echo "Testing package installation..."
+        echo "=== Testing package installation ==="
+        
+        # Verify packages were downloaded
+        if [[ ! -d "packages" ]] || [[ -z "$(ls -A packages/ 2>/dev/null)" ]]; then
+          echo "ERROR: No packages found for testing"
+          exit 1
+        fi
         
         # Test agent package
-        docker run --rm -v $PWD/packages:/packages alpine:latest sh -c "
-          apk add --allow-untrusted /packages/zabbix-agent-*.apk
-          which zabbix_agentd
-          zabbix_agentd --version
-        " || echo "Agent test failed"
+        if ls packages/zabbix-agent-*.apk >/dev/null 2>&1; then
+          echo "Testing agent package..."
+          docker run --rm -v "${PWD}/packages:/packages" alpine:latest sh -c "
+            apk add --allow-untrusted /packages/zabbix-agent-*.apk
+            which zabbix_agentd
+            zabbix_agentd --version
+          " && echo "✅ Agent test passed" || echo "❌ Agent test failed"
+        else
+          echo "⚠️ No agent package found"
+        fi
         
         # Test proxy package  
-        docker run --rm -v $PWD/packages:/packages alpine:latest sh -c "
-          apk add --allow-untrusted /packages/zabbix-proxy-*.apk
-          which zabbix_proxy
-          zabbix_proxy --version
-        " || echo "Proxy test failed"
+        if ls packages/zabbix-proxy-*.apk >/dev/null 2>&1; then
+          echo "Testing proxy package..."
+          docker run --rm -v "${PWD}/packages:/packages" alpine:latest sh -c "
+            apk add --allow-untrusted /packages/zabbix-proxy-*.apk
+            which zabbix_proxy
+            zabbix_proxy --version
+          " && echo "✅ Proxy test passed" || echo "❌ Proxy test failed"
+        else
+          echo "⚠️ No proxy package found"
+        fi
         
         echo "✅ Package deployment test completed"
