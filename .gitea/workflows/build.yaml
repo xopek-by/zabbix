@@ -151,6 +151,8 @@ jobs:
       uses: docker/setup-buildx-action@v3
 
     - name: Build Zabbix packages
+      env:
+        CI_RUN_ID: ${{ gitea.run_id }}
       run: |
         set -euo pipefail
         
