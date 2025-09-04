@@ -158,26 +158,56 @@ jobs:
         chmod +x build.sh
         ./build.sh
 
-    - name: List built packages
+    - name: Verify and list built packages
       run: |
         set -euo pipefail
         
-        echo "=== Built packages ==="
-        if [[ -d "zabbix-apk-builder/packages" ]]; then
-          ls -la zabbix-apk-builder/packages/
-          echo "=== Package sizes ==="
-          find zabbix-apk-builder/packages/ -name "*.apk" -exec du -h {} \;
-        else
-          echo "ERROR: No packages directory found"
+        echo "=== Verifying package build ==="
+        cd zabbix-apk-builder
+        
+        if [[ ! -d "packages" ]]; then
+          echo "❌ ERROR: packages directory does not exist"
+          echo "Current directory contents:"
+          ls -la .
           exit 1
         fi
+        
+        # Check for packages in the standard Alpine directory structure
+        PACKAGE_DIRS=(
+          "packages/*.apk"
+          "packages/builder/x86_64/*.apk"
+          "packages/x86_64/*.apk"
+        )
+        
+        FOUND_PACKAGES=false
+        for pattern in "${PACKAGE_DIRS[@]}"; do
+          if ls $pattern >/dev/null 2>&1; then
+            FOUND_PACKAGES=true
+            echo "✅ Packages found in: $(dirname $pattern)"
+            ls -la $pattern
+            break
+          fi
+        done
+        
+        if [[ "$FOUND_PACKAGES" == "false" ]]; then
+          echo "❌ ERROR: No packages found in any expected location"
+          echo "Directory structure:"
+          find packages -type f -name "*.apk" 2>/dev/null || echo "No .apk files found"
+          exit 1
+        fi
+        
+        echo "=== Package details ==="
+        find packages -name "*.apk" -exec bash -c 'echo "Package: $(basename "$1")"; echo "Size: $(du -h "$1" | cut -f1)"; echo "---"' _ {} \;
 
     - name: Upload packages as artifacts
       uses: actions/upload-artifact@v4
       with:
-        name: zabbix-apk-packages
-        path: zabbix-apk-builder/packages/*.apk
+        name: zabbix-apk-packages-${{ gitea.run_number }}
+        path: |
+          zabbix-apk-builder/packages/**/*.apk
+          !zabbix-apk-builder/packages/**/APKINDEX.tar.gz
         retention-days: 30
+        if-no-files-found: error
 
   deploy-test:
     needs: [check-version, build-packages]

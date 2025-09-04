@@ -36,34 +36,32 @@ COPY --chown=builder:builder . /home/builder/zabbix/
 
 WORKDIR /home/builder/zabbix
 
-# Create build script
+# Create build script that just builds packages
 USER root
-RUN cat > /usr/local/bin/build-and-copy.sh << 'EOF'
+RUN cat > /usr/local/bin/build-packages.sh << 'EOF'
 #!/bin/sh
 set -e
 
 echo "Building packages as builder user..."
 sudo -u builder sh -c "
     cd /home/builder/zabbix
+    echo 'Generating checksums...'
     abuild checksum
+    echo 'Building packages...'
     abuild -r
 "
 
-echo "Copying packages to output..."
-find /home/builder/packages -name '*.apk' -exec cp {} /output/ \;
+echo "Build complete! Packages built in /home/builder/packages:"
+find /home/builder/packages -name "*.apk" -exec ls -la {} \;
 
-# Make files readable and writable by everyone (fixes permission issues)
-chmod 666 /output/*.apk 2>/dev/null || true
+echo "Setting proper permissions on packages..."
+chmod 644 /home/builder/packages/*.apk 2>/dev/null || true
 
-# Also try changing ownership to a generic user ID that should work
-# Use UID 1000 which is common for CI runners
-chown 1000:1000 /output/*.apk 2>/dev/null || true
-
-echo "Build complete! Packages:"
-ls -la /output/
+echo "Final package list (excluding APKINDEX):"
+find /home/builder/packages -name "*.apk" -exec ls -la {} \;
 EOF
 
-RUN chmod +x /usr/local/bin/build-and-copy.sh
+RUN chmod +x /usr/local/bin/build-packages.sh
 
 # Set build command
-CMD ["/usr/local/bin/build-and-copy.sh"]
+CMD ["/usr/local/bin/build-packages.sh"]
