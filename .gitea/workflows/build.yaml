@@ -14,7 +14,7 @@ jobs:
   check-version:
     runs-on: ubuntu-latest
     # Skip the execution if the commit message contains [ci skip]
-    if: ${{ !contains(gitea.event.head_commit.message, '[ci skip]') }}
+    if: ${{ gitea.event.head_commit.author.name != 'Gitea Action' }}
     outputs:
       should_build: ${{ steps.version-check.outputs.should_build }}
       latest_version: ${{ steps.version-check.outputs.latest_version }}
