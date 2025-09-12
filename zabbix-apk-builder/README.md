@@ -4,8 +4,7 @@ Automated Alpine Linux package builder for Zabbix Agent and Proxy with CI/CD pip
 
 ## Features
 
-- 🔄 **Automatic Version Detection**: Monitors Zabbix releases using official Bitbucket API
-- 🏗️ **Docker-based Building**: Consistent, reproducible builds in isolated environment
+- 🔄 **Automatic Version Detection**: Monitors Zabbix releases using Bitbucket API
 - 🚀 **CI/CD Pipeline**: Full automation from version detection to package deployment
 - 📦 **Multi-package Support**: Builds agent and proxy packages
 - 🧪 **Automated Testing**: Tests package installation in Alpine containers
@@ -13,34 +12,24 @@ Automated Alpine Linux package builder for Zabbix Agent and Proxy with CI/CD pip
 
 ## Quick Start
 
-### 1. Repository Setup
+### Prerequisites
+
+- Docker installed
+- Gitea repository with Actions enabled
+
+### Manual Build
 
 ```bash
-# Clone this repository
-git clone https://git.mbuz.uk/mbuz/Zabbix.git
+# Clone the repository
+git clone <your-gitea-repo>
 cd zabbix-apk-builder
 
-# Make build script executable
-chmod +x build.sh
-```
-
-### 2. Manual Build
-
-```bash
 # Build packages locally
+chmod +x build.sh
 ./build.sh
 
-# Packages will be in ./packages/
-ls -la packages/
-```
-
-### 3. CI/CD Setup
-
-```bash
-# Run the setup script
-./setup-cicd.sh
-
-# Follow the prompts to configure GitHub secrets
+# Check built packages
+ls -la packages/builder/x86_64/
 ```
 
 ## Package Information
@@ -51,19 +40,12 @@ ls -la packages/
 2. **zabbix-proxy** - Zabbix Proxy
 3. **zabbix** - Meta package
 
-### Current Version
-
-- **Zabbix Version**: 7.4.2
-- **Alpine Base**: latest
-- **Architecture**: all
-
 ## CI/CD Pipeline
 
 ### Automatic Triggers
 
 - **Daily**: Checks for new Zabbix versions at 6 AM UTC
 - **Push**: Builds when code changes in main/test branches
-- **Manual**: Force builds via Gitea Actions
 
 ### Version Detection
 
@@ -91,48 +73,22 @@ GITEA_SSH_KEY  # SSH private key for Gitea access
 ### File Structure
 
 ```
-.
-└── zabbix-git
-    └── zabbix-apk-builder
-        ├── .gitea/workflows   # Workflows for Gitea actions
-        ├── .gitignore         # Ignore files 
-        ├── APKBUILD           # APKBUILD file for Zabbix
-        ├── Dockerfile         # Dockerfile for building packages
-        ├── README.md          # Project description
-        ├── build.sh           # Script for manual builds
-        ├── packages/          # Directory for built packages
-        ├── zabbix-agent.*     # Agent configuration files
-        └── zabbix-proxy.*     # Proxy configuration files
-```
-
-## Usage
-
-### Install Packages
-
-```bash
-# Add repository
-echo "http://gitea-repo/mbuz/Zabbix/raw/branch/main/alpine/v3.18/main" >> /etc/apk/repositories
-
-# Update and install
-apk update
-apk add zabbix-agent
-
-# Enable and start
-rc-update add zabbix-agent default
-rc-service zabbix-agent start
-```
-
-### Configuration
-
-```bash
-# Configure agent
-vim /etc/zabbix/zabbix_agentd.conf
-
-# Set server IP
-Server=your.zabbix.server
-
-# Restart service
-rc-service zabbix-agent restart
+zabbix-git/
+└── zabbix-apk-builder/
+    ├── .gitea/
+    │   └── workflows/
+    │       └── build.yaml         # Main CI/CD pipeline
+    ├── APKBUILD                   # Alpine package definition
+    ├── Dockerfile                 # Build environment container
+    ├── README.md                  # This file
+    ├── build.sh                   # Local build script
+    ├── packages/                  # Generated packages (gitignored)
+    ├── zabbix-agent.confd         # Agent configuration
+    ├── zabbix-agent.initd         # Agent init script
+    ├── zabbix-agent.pre-install   # Agent pre-install script
+    ├── zabbix-proxy.confd         # Proxy configuration  
+    ├── zabbix-proxy.initd         # Proxy init script
+    └── zabbix-proxy.pre-install   # Proxy pre-install script
 ```
 
 ## Development
@@ -154,28 +110,16 @@ docker run --rm -it \
 
 ### Branch Strategy
 
-- **main**: Production releases, auto-deployed
-- **test**: Testing and validation, no auto-deploy
+- **main**: Production releases, merge only
+- **test**: Testing and validation
 
 ### Making Changes
 
-1. Create feature branch from `test`
+1. Create feature branch from `main`
 2. Test changes thoroughly
-3. Merge to `test` for CI validation
-4. Merge to `main` for production release
+3. Validate CI
+4. Merge to `main`
 
-## Troubleshooting
-
-### Build Issues
-
-```bash
-# Check build logs
-docker logs $(docker ps -l -q)
-
-# Manual build debug
-docker run -it --rm -v $(pwd):/build alpine:3.18 sh
-cd /build && ./build.sh
-```
 
 ### Version Detection
 
