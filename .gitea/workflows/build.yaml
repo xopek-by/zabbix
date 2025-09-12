@@ -1,19 +1,19 @@
 name: Zabbix APK Builder
 
 on:
-  # Trigger on pushes to main/test branch
+  # Trigger on pushes to main/test branch into the zabbix-apk-builder directory
   push:
     branches: [ main, test ]
     paths: [ 'zabbix-apk-builder/**' ]
 
-  # Scheduled check for new versions (daily at 6 AM UTC)
+  # Scheduled runs at 06:00 UTC daily
   schedule:
     - cron: '0 6 * * *'
 
 jobs:
   check-version:
     runs-on: ubuntu-latest
-    # Skip the execution if the commit message contains [ci skip]
+    # Skip the execution if the commit author is the bot itself to prevent loops
     if: ${{ gitea.event.head_commit.author.name != 'Gitea Action' }}
     outputs:
       should_build: ${{ steps.version-check.outputs.should_build }}
@@ -30,47 +30,28 @@ jobs:
       run: |
         set -euo pipefail
         
-        # Install jq for JSON parsing (remove sudo for container environment)
-        apt-get update && apt-get install -y jq
+        # Remove jq installation
+        # apt-get update && apt-get install -y jq
         
         # Detect trigger type
-        if [[ "${{ gitea.event_name }}" == "push" ]]; then
-          echo "is_push_trigger=true" >> "${GITHUB_OUTPUT}"
-          echo "Triggered by push event - force build"
-        else
-          echo "is_push_trigger=false" >> "${GITHUB_OUTPUT}"
-          echo "Triggered by schedule - check version"
-        fi
+        IS_PUSH="${{ gitea.event_name == 'push' }}"
+        echo "is_push_trigger=${IS_PUSH}" >> "${GITHUB_OUTPUT}"
         
-        # Get current version from APKBUILD
+        # Get versions
         CURRENT_VERSION=$(grep '^pkgver=' zabbix-apk-builder/APKBUILD | cut -d'=' -f2)
-        echo "current_version=${CURRENT_VERSION}" >> "${GITHUB_OUTPUT}"
-        echo "Current version: ${CURRENT_VERSION}"
-        
-        # Get latest version from Zabbix API (stable releases only)
         LATEST_VERSION=$(curl -s "https://git.zabbix.com/rest/api/1.0/projects/ZBX/repos/zabbix/tags?limit=100" | \
-          jq -r '.values[].displayId' | \
-          grep -E '^[0-9]+\.[0-9]+\.[0-9]+$' | \
-          grep -v 'rc\|beta\|alpha' | \
-          sort -V | \
-          tail -1)
+          grep -o '"displayId":"[^"]*"' | cut -d'"' -f4 | \
+          grep -E '^[0-9]+\.[0-9]+\.[0-9]+$' | grep -v 'rc\|beta\|alpha' | \
+          sort -V | tail -1)
         
+        echo "current_version=${CURRENT_VERSION}" >> "${GITHUB_OUTPUT}"
         echo "latest_version=${LATEST_VERSION}" >> "${GITHUB_OUTPUT}"
-        echo "Latest version: ${LATEST_VERSION}"
         
-        # Determine if we should build based on trigger type
-        if [[ "${{ gitea.event_name }}" == "push" ]]; then
-          # Push trigger: always build to test changes
+        # Always build on push, build on schedule if versions differ
+        if [[ "${IS_PUSH}" == "true" || "${CURRENT_VERSION}" != "${LATEST_VERSION}" ]]; then
           echo "should_build=true" >> "${GITHUB_OUTPUT}"
-          echo "Build required: Push trigger detected"
-        elif [[ "${CURRENT_VERSION}" != "${LATEST_VERSION}" ]]; then
-          # Schedule trigger: only build if version changed
-          echo "should_build=true" >> "${GITHUB_OUTPUT}"
-          echo "Build required: New version ${LATEST_VERSION} available"
         else
-          # Schedule trigger: no new version
           echo "should_build=false" >> "${GITHUB_OUTPUT}"
-          echo "No build required: Version ${CURRENT_VERSION} is current"
         fi
 
   update-version:
@@ -125,18 +106,6 @@ jobs:
         token: ${{ secrets.ACCESS_TOKEN }}
         ref: ${{ gitea.ref }}
 
-    - name: Pull latest changes if version was updated
-      run: |
-        set -euo pipefail
-        
-        # Pull any version updates that may have been committed
-        if [[ "${{ needs.check-version.outputs.is_push_trigger }}" == "false" ]]; then
-          echo "Scheduled build - pulling latest changes"
-          git pull origin "${GITEA_REF_NAME:-main}" || true
-        else
-          echo "Push build - using current ref"
-        fi
-
     - name: Verify build environment
       run: |
         set -euo pipefail
@@ -163,43 +132,20 @@ jobs:
     - name: Verify and list built packages
       run: |
         set -euo pipefail
-        
-        echo "=== Verifying package build ==="
+    
         cd zabbix-apk-builder
         
-        if [[ ! -d "packages" ]]; then
-          echo "❌ ERROR: packages directory does not exist"
-          echo "Current directory contents:"
-          ls -la .
+        # Verify packages exist somewhere
+        PACKAGE_COUNT=$(find packages -name "*.apk" | wc -l)
+        
+        if [[ $PACKAGE_COUNT -eq 0 ]]; then
+          echo "ERROR: No packages found"
+          find packages -type f 2>/dev/null || echo "packages directory is empty"
           exit 1
         fi
         
-        # Check for packages in the standard Alpine directory structure
-        PACKAGE_DIRS=(
-          "packages/*.apk"
-          "packages/builder/x86_64/*.apk"
-          "packages/x86_64/*.apk"
-        )
-        
-        FOUND_PACKAGES=false
-        for pattern in "${PACKAGE_DIRS[@]}"; do
-          if ls $pattern >/dev/null 2>&1; then
-            FOUND_PACKAGES=true
-            echo "✅ Packages found in: $(dirname $pattern)"
-            ls -la $pattern
-            break
-          fi
-        done
-        
-        if [[ "$FOUND_PACKAGES" == "false" ]]; then
-          echo "❌ ERROR: No packages found in any expected location"
-          echo "Directory structure:"
-          find packages -type f -name "*.apk" 2>/dev/null || echo "No .apk files found"
-          exit 1
-        fi
-        
-        echo "=== Package details ==="
-        find packages -name "*.apk" -exec bash -c 'echo "Package: $(basename "$1")"; echo "Size: $(du -h "$1" | cut -f1)"; echo "---"' _ {} \;
+        echo "Found $PACKAGE_COUNT packages:"
+        find packages -name "*.apk" -exec ls -lh {} \;
 
     - name: Upload packages as artifacts
       uses: actions/upload-artifact@v3
@@ -225,60 +171,33 @@ jobs:
       run: |
         set -euo pipefail
         
-        echo "=== Testing package installation ==="
+        # Find packages
+        AGENT_PKG=$(find packages -name "zabbix-agent-*.apk" | head -1)
+        PROXY_PKG=$(find packages -name "zabbix-proxy-*.apk" | head -1)
         
-        # Debug: Show what was actually downloaded
-        echo "Downloaded packages:"
-        ls -la packages/
-        echo "Builder directory:"
-        ls -la packages/builder/ 2>/dev/null || echo "No builder directory"
-        echo "x86_64 directory:"
-        ls -la packages/builder/x86_64/ 2>/dev/null || echo "No x86_64 directory"
-        echo "All .apk files:"
-        find packages/ -name "*.apk" -type f 2>/dev/null || echo "No .apk files found"
-        
-        # Use known paths - packages are uploaded from zabbix-apk-builder/packages/**/*.apk
-        # and downloaded to packages/, so they should be in packages/builder/x86_64/
-        PACKAGE_DIR="packages/builder/x86_64"
-        AGENT_PKG="$PACKAGE_DIR/zabbix-agent-7.4.2-r0.apk"
-        PROXY_PKG="$PACKAGE_DIR/zabbix-proxy-7.4.2-r0.apk"
-        
-        # Test agent package
-        if [[ -f "$AGENT_PKG" ]]; then
-          echo "Testing agent package at: $AGENT_PKG"
-          echo "File size: $(du -h "$AGENT_PKG")"
+        # Test function
+        test_package() {
+          local pkg="$1"
+          local binary="$2"
           
-          # Create container, copy package, install and test
-          CONTAINER_ID=$(docker run -d alpine:latest sleep 30)
-          docker cp "$AGENT_PKG" "$CONTAINER_ID:/$(basename "$AGENT_PKG")"
-          docker exec "$CONTAINER_ID" sh -c "
-            ls -la /$(basename "$AGENT_PKG")
-            apk add --allow-untrusted /$(basename "$AGENT_PKG")
-            which zabbix_agentd
-            zabbix_agentd --version
-          " && echo "✅ Agent test passed" || echo "❌ Agent test failed"
-          docker rm -f "$CONTAINER_ID" >/dev/null
-        else
-          echo "⚠️ Agent package not found at $AGENT_PKG"
-        fi
+          if [[ -f "$pkg" ]]; then
+            echo "Testing $(basename "$pkg")..."
+            CONTAINER_ID=$(docker run -d alpine:latest sleep 30)
+            docker cp "$pkg" "$CONTAINER_ID:/$(basename "$pkg")"
+            if docker exec "$CONTAINER_ID" sh -c "
+              apk add --allow-untrusted /$(basename "$pkg") >/dev/null 2>&1
+              which $binary >/dev/null 2>&1
+              $binary --version >/dev/null 2>&1
+            "; then
+              echo "SUCCESS: $(basename "$pkg") test passed"
+            else
+              echo "FAIL: $(basename "$pkg") test failed"
+            fi
+            docker rm -f "$CONTAINER_ID" >/dev/null
+          else
+            echo "ERROR: Package not found: $pkg"
+          fi
+        }
         
-        # Test proxy package  
-        if [[ -f "$PROXY_PKG" ]]; then
-          echo "Testing proxy package at: $PROXY_PKG"
-          echo "File size: $(du -h "$PROXY_PKG")"
-          
-          # Create container, copy package, install and test
-          CONTAINER_ID=$(docker run -d alpine:latest sleep 30)
-          docker cp "$PROXY_PKG" "$CONTAINER_ID:/$(basename "$PROXY_PKG")"
-          docker exec "$CONTAINER_ID" sh -c "
-            ls -la /$(basename "$PROXY_PKG")
-            apk add --allow-untrusted /$(basename "$PROXY_PKG")
-            which zabbix_proxy
-            zabbix_proxy --version
-          " && echo "✅ Proxy test passed" || echo "❌ Proxy test failed"
-          docker rm -f "$CONTAINER_ID" >/dev/null
-        else
-          echo "⚠️ Proxy package not found at $PROXY_PKG"
-        fi
-        
-        echo "✅ Package deployment test completed"
+        test_package "$AGENT_PKG" "zabbix_agentd"
+        test_package "$PROXY_PKG" "zabbix_proxy"
