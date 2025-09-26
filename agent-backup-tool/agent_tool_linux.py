@@ -228,7 +228,7 @@ class ZabbixAgentTool:
     def _upgrade_zabbix_package(self):
         """Upgrade Zabbix agent package based on distribution family"""
         commands = {
-            'debian': ["sudo apt update", "sudo apt upgrade -y zabbix-agent* || sudo apt upgrade -y zabbix-proxy*"],
+            'debian': ["sudo apt update", "sudo apt upgrade -y zabbix-agent*"],
             'rhel': ["sudo yum update -y zabbix-agent* || sudo dnf update -y zabbix-agent*"]
         }
         
