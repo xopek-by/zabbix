@@ -230,55 +230,19 @@ class ZabbixAgentTool:
         logger.info(f"Upgrading Zabbix agent on {self.distro_family}-based system")
         
         if self.distro_family == 'debian':
-            # Update package lists
+            # Simple apt upgrade
             self._run_command("sudo apt update")
-            
-            # Check what zabbix packages are installed first
-            result = self._run_command("dpkg -l | grep -E 'zabbix-agent'", check=False, log_output=True)
-            if result.returncode != 0:
-                logger.warning("No Zabbix agent packages found installed")
-                return
-            
-            # Get list of installed zabbix agent packages
-            installed_packages = []
-            if result.stdout:
-                for line in result.stdout.strip().split('\n'):
-                    if 'zabbix-agent' in line:
-                        # Extract package name from dpkg output
-                        parts = line.split()
-                        if len(parts) >= 2:
-                            package_name = parts[1]
-                            installed_packages.append(package_name)
-            
-            if not installed_packages:
-                logger.warning("No Zabbix agent packages found to upgrade")
-                return
-            
-            # Upgrade each installed package individually
-            for package in installed_packages:
-                try:
-                    logger.info(f"Upgrading {package}")
-                    # Use DEBIAN_FRONTEND=noninteractive to avoid prompts
-                    self._run_command(f"sudo DEBIAN_FRONTEND=noninteractive apt upgrade -y {package}")
-                except Exception as e:
-                    logger.warning(f"Could not upgrade {package}: {e}")
+            self._run_command("sudo apt upgrade -y")
                     
         elif self.distro_family == 'rhel':
-            # For RHEL-based systems
+            # Simple yum/dnf upgrade - try both
             try:
-                # Try yum first
-                result = self._run_command("yum list installed | grep zabbix-agent", check=False)
-                if result.returncode == 0:
-                    self._run_command("sudo yum update -y zabbix-agent*")
-                else:
-                    # Try dnf
-                    result = self._run_command("dnf list installed | grep zabbix-agent", check=False)
-                    if result.returncode == 0:
-                        self._run_command("sudo dnf update -y zabbix-agent*")
-                    else:
-                        logger.warning("No Zabbix agent packages found to upgrade")
-            except Exception as e:
-                logger.warning(f"Could not upgrade packages: {e}")
+                self._run_command("sudo yum update -y")
+            except:
+                try:
+                    self._run_command("sudo dnf update -y")
+                except Exception as e:
+                    logger.warning(f"Could not upgrade packages: {e}")
         else:
             raise Exception(f"Unsupported distribution family: {self.distro_family}")
     
