@@ -1,7 +1,7 @@
 # Contributor: Maksym Buz <maksym.buz@zabbix.com>
 # Maintainer: Maksym Buz <maksym.buz@zabbix.com>
 pkgname=zabbix
-pkgver=7.4.2
+pkgver=7.4.3
 pkgrel=0
 pkgdesc="Enterprise-class open source distributed monitoring solution"
 url="https://www.zabbix.com/"
@@ -139,7 +139,7 @@ proxy() {
 	install -dm755 "$subpkgdir"/var/run/zabbix
 }
 # --- TEST --- 
-sha512sums="
+sha512sums="SKIP"
 SKIP
 SKIP
 SKIP
