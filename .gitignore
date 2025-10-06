@@ -3,4 +3,4 @@ venv/
 export/
 *_host_ids.txt
 *.log
-backupps/
+backups/
