@@ -1,0 +1,6 @@
+__pycache__/
+venv/
+export/
+*_host_ids.txt
+*.log
+backupps/
