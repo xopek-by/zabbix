@@ -61,13 +61,13 @@ def create_hosts():
 
     for i in range(0, len(hosts), BATCH_SIZE):
         batch = hosts[i:i + BATCH_SIZE]
-        print(f"Creating hosts {i+1}–{i+len(batch)}...")
+        print(f"Creating hosts {i+1}-{i+len(batch)}...")
         try:
             resp = zbx_request("host.create", batch)
             created = len(resp.get("result", {}).get("hostids", []))
-            print(f"✅ Created {created} hosts.")
+            print(f"Created {created} hosts.")
         except Exception as e:
-            print(f"❌ Error in batch {i+1}–{i+len(batch)}: {e}")
+            print(f"Error in batch {i+1}-{i+len(batch)}: {e}")
         time.sleep(1)
 
 if __name__ == "__main__":
