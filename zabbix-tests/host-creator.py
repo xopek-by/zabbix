@@ -37,25 +37,10 @@ def create_hosts():
         host_name = f"dummy-host-{i:04d}"
         host = {
             "host": host_name,
-            "interfaces": [{
-                "type": 1,       # Zabbix agent
-                "main": 1,
-                "useip": 1,
-                "ip": "127.0.0.1",
-                "dns": "",
-                "port": "10050"
-            }],
             "groups": [{"groupid": GROUP_ID}],
-            "templates": [{"templateid": "10048"}],  # assign template ID 10048
+            "templates": [{"templateid": "10048"}],  # assign Proxy Health template
             "monitored_by": 2,               # 2 = proxy group
-            "proxy_groupid": PROXY_GROUP_ID, # your proxy group ID
-            "items": [{
-                "name": "Dummy metric",
-                "key_": "dummy.value",
-                "type": 2,        # trapper
-                "value_type": 0,  # numeric float
-                "delay": "60s"
-            }]
+            "proxy_groupid": PROXY_GROUP_ID  # your proxy group ID
         }
         hosts.append(host)
 
