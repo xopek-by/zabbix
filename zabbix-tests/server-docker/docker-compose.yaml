@@ -1,0 +1,224 @@
+### This will create a Zabbix server with six active proxies and a MySQL database.
+### You need to configure proxies in Zabbix frontend after deployment.
+### Adjust .env file for customization.
+
+services:
+  mysql-server:
+    image: mysql:${MYSQL_VERSION:-8.4.0-oraclelinux8}
+    container_name: zabbix-mysql-server
+    command:
+      - 'mysqld'
+      - '--character-set-server=utf8mb4'
+      - '--collation-server=utf8mb4_bin'
+      - '--log-bin-trust-function-creators=1'
+    environment:
+      - MYSQL_DATABASE=${MYSQL_DATABASE}
+      - MYSQL_USER=${MYSQL_USER}
+      - MYSQL_PASSWORD=${MYSQL_PASSWORD}
+      - MYSQL_ROOT_PASSWORD=${MYSQL_ROOT_PASSWORD}
+    volumes:
+      - ./zabbix/mysql:/var/lib/mysql
+    restart: unless-stopped
+    networks:
+      - zabbix-net
+
+  zabbix-server:
+    image: zabbix/zabbix-server-mysql:${ZABBIX_VERSION:-latest}
+    container_name: zabbix-server
+    depends_on:
+      - mysql-server
+    ports:
+      - "${ZABBIX_SERVER_PORT}:10051"
+    environment:
+      - DB_SERVER_HOST=mysql-server
+      - MYSQL_DATABASE=${MYSQL_DATABASE}
+      - MYSQL_USER=${MYSQL_USER}
+      - MYSQL_PASSWORD=${MYSQL_PASSWORD}
+      - ZBX_STARTSNMPTRAPPER=${ZBX_STARTSNMPTRAPPER}
+      - ZBX_SNMPTRAPPERFILE=${ZBX_SNMPTRAPPERFILE}
+      - ZBX_CACHESIZE=${ZBX_CACHESIZE}
+      - ZBX_VALUECACHESIZE=${ZBX_VALUECACHESIZE}
+      - ZBX_TRENDCACHESIZE=${ZBX_TRENDCACHESIZE}
+    volumes:
+      - ./zabbix/alertscripts:/usr/lib/zabbix/alertscripts
+      - ./zabbix/externalscripts:/usr/lib/zabbix/externalscripts
+    restart: unless-stopped
+    networks:
+      - zabbix-net
+
+  zabbix-web:
+    image: zabbix/zabbix-web-nginx-mysql:${ZABBIX_VERSION:-latest}
+    container_name: zabbix-web
+    depends_on:
+      - mysql-server
+      - zabbix-server
+    ports:
+      - "${ZABBIX_WEB_PORT}:8080"
+    environment:
+      - DB_SERVER_HOST=mysql-server
+      - MYSQL_DATABASE=${MYSQL_DATABASE}
+      - MYSQL_USER=${MYSQL_USER}
+      - MYSQL_PASSWORD=${MYSQL_PASSWORD}
+      - ZBX_SERVER_HOST=zabbix-server
+      - PHP_TZ=${PHP_TIMEZONE}
+    restart: unless-stopped
+    networks:
+      - zabbix-net
+
+  zabbix-proxy-active-01:
+    image: zabbix/zabbix-proxy-sqlite3:${ZABBIX_VERSION:-latest}
+    container_name: zabbix-proxy-active-01
+    depends_on:
+      - zabbix-server
+    ports:
+      - "10101:10051"
+    environment:
+      - ZBX_HOSTNAME=zabbix-proxy-active-01
+      - ZBX_SERVER_HOST=zabbix-server
+      - ZBX_PROXYMODE=0
+      - ZBX_CACHESIZE=${PROXY_CACHE_SIZE}
+      - ZBX_HISTORYCACHESIZE=${PROXY_HISTORY_CACHE_SIZE}
+      - ZBX_HISTORYINDEXCACHESIZE=${PROXY_HISTORY_INDEX_CACHE_SIZE}
+      - ZBX_PROXYBUFFERMODE=${PROXY_BUFFER_MODE}
+      - ZBX_PROXYMEMORYBUFFERSIZE=${PROXY_MEMORY_BUFFER_SIZE}
+    volumes:
+      - ./zabbix/proxy-01:/var/lib/zabbix/db_data:rw
+    restart: unless-stopped
+    networks:
+      - zabbix-net
+
+  zabbix-proxy-active-02:
+    image: zabbix/zabbix-proxy-sqlite3:${ZABBIX_VERSION:-latest}
+    container_name: zabbix-proxy-active-02
+    depends_on:
+      - zabbix-server
+    ports:
+      - "10102:10051"
+    environment:
+      - ZBX_HOSTNAME=zabbix-proxy-active-02
+      - ZBX_SERVER_HOST=zabbix-server
+      - ZBX_PROXYMODE=0
+      - ZBX_CACHESIZE=${PROXY_CACHE_SIZE}
+      - ZBX_HISTORYCACHESIZE=${PROXY_HISTORY_CACHE_SIZE}
+      - ZBX_HISTORYINDEXCACHESIZE=${PROXY_HISTORY_INDEX_CACHE_SIZE}
+      - ZBX_PROXYBUFFERMODE=${PROXY_BUFFER_MODE}
+      - ZBX_PROXYMEMORYBUFFERSIZE=${PROXY_MEMORY_BUFFER_SIZE}
+    volumes:
+      - ./zabbix/proxy-02:/var/lib/zabbix/db_data:rw
+    restart: unless-stopped
+    networks:
+      - zabbix-net
+
+  zabbix-proxy-active-03:
+    image: zabbix/zabbix-proxy-sqlite3:${ZABBIX_VERSION:-latest}
+    container_name: zabbix-proxy-active-03
+    depends_on:
+      - zabbix-server
+    ports:
+      - "10103:10051"
+    environment:
+      - ZBX_HOSTNAME=zabbix-proxy-active-03
+      - ZBX_SERVER_HOST=zabbix-server
+      - ZBX_PROXYMODE=0
+      - ZBX_CACHESIZE=${PROXY_CACHE_SIZE}
+      - ZBX_HISTORYCACHESIZE=${PROXY_HISTORY_CACHE_SIZE}
+      - ZBX_HISTORYINDEXCACHESIZE=${PROXY_HISTORY_INDEX_CACHE_SIZE}
+      - ZBX_PROXYBUFFERMODE=${PROXY_BUFFER_MODE}
+      - ZBX_PROXYMEMORYBUFFERSIZE=${PROXY_MEMORY_BUFFER_SIZE}
+    volumes:
+      - ./zabbix/proxy-03:/var/lib/zabbix/db_data:rw
+    restart: unless-stopped
+    networks:
+      - zabbix-net
+
+  zabbix-proxy-active-04:
+    image: zabbix/zabbix-proxy-sqlite3:${ZABBIX_VERSION:-latest}
+    container_name: zabbix-proxy-active-04
+    depends_on:
+      - zabbix-server
+    ports:
+      - "10104:10051"
+    environment:
+      - ZBX_HOSTNAME=zabbix-proxy-active-04
+      - ZBX_SERVER_HOST=zabbix-server
+      - ZBX_PROXYMODE=0
+      - ZBX_CACHESIZE=${PROXY_CACHE_SIZE}
+      - ZBX_HISTORYCACHESIZE=${PROXY_HISTORY_CACHE_SIZE}
+      - ZBX_HISTORYINDEXCACHESIZE=${PROXY_HISTORY_INDEX_CACHE_SIZE}
+      - ZBX_PROXYBUFFERMODE=${PROXY_BUFFER_MODE}
+      - ZBX_PROXYMEMORYBUFFERSIZE=${PROXY_MEMORY_BUFFER_SIZE}
+    volumes:
+      - ./zabbix/proxy-04:/var/lib/zabbix/db_data:rw
+    restart: unless-stopped
+    networks:
+      - zabbix-net
+
+  zabbix-proxy-active-05:
+    image: zabbix/zabbix-proxy-sqlite3:${ZABBIX_VERSION:-latest}
+    container_name: zabbix-proxy-active-05
+    depends_on:
+      - zabbix-server
+    ports:
+      - "10105:10051"
+    environment:
+      - ZBX_HOSTNAME=zabbix-proxy-active-05
+      - ZBX_SERVER_HOST=zabbix-server
+      - ZBX_PROXYMODE=0
+      - ZBX_CACHESIZE=${PROXY_CACHE_SIZE}
+      - ZBX_HISTORYCACHESIZE=${PROXY_HISTORY_CACHE_SIZE}
+      - ZBX_HISTORYINDEXCACHESIZE=${PROXY_HISTORY_INDEX_CACHE_SIZE}
+      - ZBX_PROXYBUFFERMODE=${PROXY_BUFFER_MODE}
+      - ZBX_PROXYMEMORYBUFFERSIZE=${PROXY_MEMORY_BUFFER_SIZE}
+    volumes:
+      - ./zabbix/proxy-05:/var/lib/zabbix/db_data:rw
+    restart: unless-stopped
+    networks:
+      - zabbix-net
+
+  zabbix-proxy-active-06:
+    image: zabbix/zabbix-proxy-sqlite3:${ZABBIX_VERSION:-latest}
+    container_name: zabbix-proxy-active-06
+    depends_on:
+      - zabbix-server
+    ports:
+      - "10106:10051"
+    environment:
+      - ZBX_HOSTNAME=zabbix-proxy-active-06
+      - ZBX_SERVER_HOST=zabbix-server
+      - ZBX_PROXYMODE=0
+      - ZBX_CACHESIZE=${PROXY_CACHE_SIZE}
+      - ZBX_HISTORYCACHESIZE=${PROXY_HISTORY_CACHE_SIZE}
+      - ZBX_HISTORYINDEXCACHESIZE=${PROXY_HISTORY_INDEX_CACHE_SIZE}
+      - ZBX_PROXYBUFFERMODE=${PROXY_BUFFER_MODE}
+      - ZBX_PROXYMEMORYBUFFERSIZE=${PROXY_MEMORY_BUFFER_SIZE}
+    volumes:
+      - ./zabbix/proxy-06:/var/lib/zabbix/db_data:rw
+    restart: unless-stopped
+    networks:
+      - zabbix-net
+
+  # zabbix-proxy-passive-03:
+  #   image: zabbix/zabbix-proxy-sqlite3:${ZABBIX_VERSION:-latest}
+  #   container_name: zabbix-proxy-passive-03
+  #   depends_on:
+  #     - zabbix-server
+  #   ports:
+  #     - "10103:10051"
+  #   environment:
+  #     - ZBX_HOSTNAME=zabbix-proxy-passive-03
+  #     - ZBX_SERVER_HOST=zabbix-server
+  #     - ZBX_PROXYMODE=1
+  #     - ZBX_CACHESIZE=${PROXY_CACHE_SIZE}
+  #     - ZBX_HISTORYCACHESIZE=${PROXY_HISTORY_CACHE_SIZE}
+  #     - ZBX_HISTORYINDEXCACHESIZE=${PROXY_HISTORY_INDEX_CACHE_SIZE}
+  #     - ZBX_PROXYBUFFERMODE=${PROXY_BUFFER_MODE}
+  #     - ZBX_PROXYMEMORYBUFFERSIZE=${PROXY_MEMORY_BUFFER_SIZE}
+  #   volumes:
+  #     - ./zabbix/proxy-03:/var/lib/zabbix/db_data:rw
+  #   restart: unless-stopped
+  #   networks:
+  #     - zabbix-net
+
+networks:
+  zabbix-net:
+    driver: bridge

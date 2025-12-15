@@ -1,0 +1,11 @@
+# Configuration for zabbix-proxy
+
+# User and group for the proxy
+ZABBIX_PROXY_USER="zabbix"
+ZABBIX_PROXY_GROUP="zabbix"
+
+# Configuration file location
+ZABBIX_PROXY_CONFIG="/etc/zabbix/zabbix_proxy.conf"
+
+# PID file location
+ZABBIX_PROXY_PID="/var/run/zabbix/zabbix_proxy.pid"

@@ -1,0 +1,11 @@
+# Configuration for zabbix-agent
+
+# User and group for the agent
+ZABBIX_AGENT_USER="zabbix"
+ZABBIX_AGENT_GROUP="zabbix"
+
+# Configuration file location
+ZABBIX_AGENT_CONFIG="/etc/zabbix/zabbix_agentd.conf"
+
+# PID file location
+ZABBIX_AGENT_PID="/var/run/zabbix/zabbix_agentd.pid"

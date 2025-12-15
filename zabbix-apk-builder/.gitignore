@@ -1,0 +1,17 @@
+# Build artifacts
+packages/
+*.apk
+src/
+*.tar.gz
+
+# Docker cache
+.docker/
+
+# Backup files
+*.backup
+*.bak
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
