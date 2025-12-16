@@ -1,7 +1,7 @@
 # Contributor: Maksym Buz <maksym.buz@zabbix.com>
 # Maintainer: Maksym Buz <maksym.buz@zabbix.com>
 pkgname=zabbix
-pkgver=7.4.4
+pkgver=7.4.5
 pkgrel=0
 pkgdesc="Enterprise-class open source distributed monitoring solution"
 url="https://www.zabbix.com/"
