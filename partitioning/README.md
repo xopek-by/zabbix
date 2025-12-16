@@ -174,7 +174,101 @@ Alternatively, use systemd timers for more robust scheduling and logging.
 
 ---
 
+---
+
 ## 8. Troubleshooting
 - **Connection Refused**: Check `host`, `port` in config. Ensure MySQL is running.
 - **Access Denied (1227)**: The DB user needs `SUPER` privileges to disable binary logging (`replicate_sql: False`). Either grant the privilege or set `replicate_sql: True` (if replication load is acceptable).
 - **Primary Key Error**: "Primary Key does not include 'clock'". The table cannot be partitioned by range on `clock` without schema changes. Remove it from config.
+
+## 9. Docker Usage
+
+You can run the partitioning script as a stateless Docker container. This is ideal for Kubernetes CronJobs or environments where you don't want to manage Python dependencies on the host.
+
+### 9.1 Build the Image
+The image is not yet published to a public registry, so you must build it locally:
+```bash
+cd /opt/git/Zabbix/partitioning
+docker build -t zabbix-partitioning -f docker/Dockerfile .
+```
+
+### 9.2 Operations
+The container uses `entrypoint.py` to auto-generate the configuration file from Environment Variables at runtime.
+
+#### Scenario A: Dry Run (Check Configuration)
+Verify that your connection and retention settings are correct without making changes.
+```bash
+docker run --rm \
+  -e DB_HOST=10.0.0.5 -e DB_USER=zabbix -e DB_PASSWORD=secret \
+  -e RETENTION_HISTORY=7d \
+  -e RETENTION_TRENDS=365d \
+  -e RUN_MODE=dry-run \
+  zabbix-partitioning
+```
+
+#### Scenario B: Initialization (First Run)
+Convert your existing tables to partitioned tables. 
+> [!WARNING]
+> Ensure backup exists and Zabbix Housekeeper is disabled!
+```bash
+docker run --rm \
+  -e DB_HOST=10.0.0.5 -e DB_USER=zabbix -e DB_PASSWORD=secret \
+  -e RETENTION_HISTORY=14d \
+  -e RETENTION_TRENDS=365d \
+  -e RUN_MODE=init \
+  zabbix-partitioning
+```
+
+#### Scenario C: Daily Maintenance (Cron/Scheduler)
+Run this daily (e.g., via K8s CronJob) to create future partitions and drop old ones.
+```bash
+docker run --rm \
+  -e DB_HOST=10.0.0.5 -e DB_USER=zabbix -e DB_PASSWORD=secret \
+  -e RETENTION_HISTORY=14d \
+  -e RETENTION_TRENDS=365d \
+  zabbix-partitioning
+```
+
+#### Scenario D: Custom Overrides
+You can override the retention period for specific tables or change their partitioning interval.
+*Example: Force `history_log` to be partitioned **Weekly** with 30-day retention.*
+```bash
+docker run --rm \
+  -e DB_HOST=10.0.0.5 \
+  -e RETENTION_HISTORY=7d \
+  -e PARTITION_WEEKLY_history_log=30d \
+  zabbix-partitioning
+```
+
+#### Scenario E: SSL Connection
+Mount your certificates and provide the paths.
+```bash
+docker run --rm \
+  -e DB_HOST=zabbix-db \
+  -e DB_SSL_CA=/certs/ca.pem \
+  -e DB_SSL_CERT=/certs/client-cert.pem \
+  -e DB_SSL_KEY=/certs/client-key.pem \
+  -v /path/to/local/certs:/certs \
+  zabbix-partitioning
+```
+
+### 9.3 Supported Environment Variables
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `DB_HOST` | localhost | Database hostname |
+| `DB_PORT` | 3306 | Database port |
+| `DB_USER` | zabbix | Database user |
+| `DB_PASSWORD` | zabbix | Database password |
+| `DB_NAME` | zabbix | Database name |
+| `DB_SSL_CA` | - | Path to CA Certificate |
+| `DB_SSL_CERT` | - | Path to Client Certificate |
+| `DB_SSL_KEY` | - | Path to Client Key |
+| `RETENTION_HISTORY` | 14d | Retention for `history*` tables |
+| `RETENTION_TRENDS` | 365d | Retention for `trends*` tables |
+| `RETENTION_AUDIT` | 365d | Retention for `auditlog` (if enabled) |
+| `ENABLE_AUDITLOG_PARTITIONING` | false | Set to `true` to partition `auditlog` |
+| `RUN_MODE` | maintenance | `init` (initialize), `maintenance` (daily run), or `dry-run` |
+| `PARTITION_DAILY_[TABLE]` | - | Custom daily retention (e.g., `PARTITION_DAILY_mytable=30d`) |
+| `PARTITION_WEEKLY_[TABLE]` | - | Custom weekly retention |
+| `PARTITION_MONTHLY_[TABLE]` | - | Custom monthly retention |
+
