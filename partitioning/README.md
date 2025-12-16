@@ -47,8 +47,16 @@ The script manages MySQL table partitions based on time (Range Partitioning on t
 ---
 
 ## 3. Configuration
-Edit `/etc/zabbix/zabbix_partitioning.conf`:
+The preferred way to create the configuration file is using the **Interactive Wizard**:
 
+```bash
+/opt/zabbix_partitioning/zabbix_partitioning.py --wizard
+```
+
+Follow the on-screen prompts to configure your database connection, retention periods, and other settings. The wizard will generate the YAML configuration file for you.
+
+### Automatic Config Structure (Reference)
+If you prefer to edit manually `/etc/zabbix/zabbix_partitioning.conf`:
 ```yaml
 database:
     host: localhost
@@ -56,6 +64,7 @@ database:
     passwd: YOUR_PASSWORD
     db: zabbix
     # port: 3306  # Optional, default is 3306
+    # socket: /var/run/mysqld/mysqld.sock # Overrides host if present
 
 partitions:
     daily:
@@ -74,9 +83,7 @@ partitions:
   - **`yearly`**: Partitions are created for each year. 
   - Retention Format: `14d` (days), `12w` (weeks), `12m` (months), `1y` (years).
 
-- **`initial_partitioning_start`**: Controls how the very FIRST partition is determined during initialization (`--init` mode).
-  - `db_min`: (Default) Queries the table for the oldest record (`MIN(clock)`). Accurate but **slow** on large tables.
-  - `retention`: (Recommended for large DBs) Skips the query. Calculates the start date as `Now - Retention Period`. Creates a single `p_archive` partition for all data older than that date.
+- **`replicate_sql`**: Controls MySQL Binary Logging for partitioning commands.
 
 - **`premake`**: Number of future partitions to create in advance.
   - Default: `10`. Ensures you have a buffer if the script fails to run for a few days.
@@ -90,7 +97,25 @@ partitions:
 
 ---
 
-## 4. Zabbix Preparation (CRITICAL)
+---
+
+## 4. Runtime Parameters
+
+| Argument | Description |
+|---|---|
+| `-c`, `--config FILE` | Path to configuration file (Default: `/etc/zabbix/zabbix_partitioning.conf`) |
+| `-i`, `--init` | Initialize partitions (converts tables). |
+| `--fast-init` | Skip slow table scan during initialization. Starts from retention period. |
+| `--wizard` | Launch interactive configuration wizard. |
+| `-r`, `--dry-run` | Simulate queries without executing. Logs expected actions (Safe mode). |
+| `-v`, `--verbose` | Enable debug logging (DEBUG level). |
+| `--stats TABLE` | Output JSON statistics (Size, Count, Days Left) for a specific table. |
+| `--discovery` | Output Zabbix Low-Level Discovery (LLD) JSON. |
+| `-V`, `--version` | Show script version. |
+
+---
+
+## 5. Zabbix Preparation (CRITICAL)
 Before partitioning, you **must disable** Zabbix's internal housekeeping for the tables you intend to partition. If you don't, Zabbix will try to delete individual rows while the script tries to drop partitions, causing conflicts.
 
 1.  Log in to Zabbix Web Interface.
@@ -102,24 +127,35 @@ Before partitioning, you **must disable** Zabbix's internal housekeeping for the
 
 ---
 
-## 5. Initialization
+## 6. Initialization
 This step converts existing standard tables into partitioned tables.
 
 1.  **Dry Run** (Verify what will happen):
     ```bash
     /opt/zabbix_partitioning/zabbix_partitioning.py --init --dry-run
     ```
-    *Check the output for any errors.*
 
 2.  **Execute Initialization**:
+    There are two strategies for initialization:
+
+    **A. Standard Initialization (Default)**:
+    Scans the database to find the oldest record (`MIN(clock)`) and creates partitions from that point forward.
+    *Best for smaller databases or when you need to retain ALL existing data.*
     ```bash
     /opt/zabbix_partitioning/zabbix_partitioning.py --init
     ```
-    *This may take time depending on table size.*
+
+    **B. Fast Initialization (`--fast-init`)**:
+    Skips the slow table scan. It calculates the start date based on your configured **Retention Period** (e.g., `Now - 365d`).
+    It creates a single catch-all `p_archive` partition for all data older than the retention start date, then creates granular partitions forward.
+    *Recommended for large databases to avoid long table locks/scans.*
+    ```bash
+    /opt/zabbix_partitioning/zabbix_partitioning.py --init --fast-init
+    ```
 
 ---
 
-## 6. Automation (Cron Job)
+## 7. Automation (Cron Job)
 Set up a daily cron job to create new partitions and remove old ones.
 
 1.  Open crontab:
@@ -133,7 +169,7 @@ Set up a daily cron job to create new partitions and remove old ones.
 
 ---
 
-## 7. Automation (Systemd Timer) — Recommended
+## 8. Automation (Systemd Timer) — Recommended
 Alternatively, use systemd timers for more robust scheduling and logging.
 
 1.  **Create Service Unit** (`/etc/systemd/system/zabbix-partitioning.service`):
@@ -176,12 +212,12 @@ Alternatively, use systemd timers for more robust scheduling and logging.
 
 ---
 
-## 8. Troubleshooting
+## 9. Troubleshooting
 - **Connection Refused**: Check `host`, `port` in config. Ensure MySQL is running.
 - **Access Denied (1227)**: The DB user needs `SUPER` privileges to disable binary logging (`replicate_sql: False`). Either grant the privilege or set `replicate_sql: True` (if replication load is acceptable).
 - **Primary Key Error**: "Primary Key does not include 'clock'". The table cannot be partitioned by range on `clock` without schema changes. Remove it from config.
 
-## 9. Docker Usage
+## 10. Docker Usage
 
 You can run the partitioning script as a stateless Docker container. This is ideal for Kubernetes CronJobs or environments where you don't want to manage Python dependencies on the host.
 
@@ -267,8 +303,8 @@ docker run --rm \
 | `RETENTION_TRENDS` | 365d | Retention for `trends*` tables |
 | `RETENTION_AUDIT` | 365d | Retention for `auditlog` (if enabled) |
 | `ENABLE_AUDITLOG_PARTITIONING` | false | Set to `true` to partition `auditlog` |
-| `RUN_MODE` | maintenance | `init`, `maintenance`, `dry-run`, `discovery`, `check` |
-| `CHECK_TARGET` | - | Required if `RUN_MODE=check`. Table name to check (e.g. `history`). |
+| `RUN_MODE` | maintenance | `init`, `maintenance`, `dry-run`, `discovery`, `stats` |
+| `CHECK_TARGET` | - | Required if `RUN_MODE=stats`. Table name to check (e.g. `history`). |
 | `PARTITION_DAILY_[TABLE]` | - | Custom daily retention (e.g., `PARTITION_DAILY_mytable=30d`) |
 | `PARTITION_WEEKLY_[TABLE]` | - | Custom weekly retention |
 | `PARTITION_MONTHLY_[TABLE]` | - | Custom monthly retention |
@@ -282,36 +318,37 @@ docker run --rm \
   zabbix-partitioning
 ```
 
-#### Scenario G: Monitoring (Health Check)
-Check days remaining for a specific table (e.g., `history`). Returns integer days.
+#### Scenario G: Monitoring (Stats)
+Get detailed JSON statistics for a specific table.
 ```bash
 docker run --rm \
   -e DB_HOST=zabbix-db \
-  -e RUN_MODE=check \
+  -e RUN_MODE=stats \
   -e CHECK_TARGET=history \
   zabbix-partitioning
 ```
 
 ---
 
-## 10. Monitoring
+## 11. Monitoring
 The script includes built-in features for monitoring the health of your partitions via Zabbix.
 
 ### 10.1 CLI Usage
 - **Discovery (LLD)**:
+  Output the list of configured tables for Zabbix Discovery rules.
   ```bash
   ./zabbix_partitioning.py --discovery
   # Output: [{"{#TABLE}": "history", "{#PERIOD}": "daily"}, ...]
   ```
-- **Check Days**:
+- **Statistics (JSON)**:
+  Get detailed stats (Size, Partition Count, Days Remaining).
   ```bash
-  ./zabbix_partitioning.py --check-days history
-  # Output: 30 (integer days remaining)
+  ./zabbix_partitioning.py --stats history
+  # Output: {"table": "history", "size_bytes": 102400, "partition_count": 5, "days_left": 30}
   ```
 - **Version**:
   ```bash
   ./zabbix_partitioning.py --version
-  # Output: zabbix_partitioning.py 0.3.1-test
   ```
 
 ### 10.2 Zabbix Template
