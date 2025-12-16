@@ -13,7 +13,9 @@ zabbix_export:
         1. Install zabbix_partitioning.py on the Zabbix Server/Proxy.
         2. Configure userparameter for automatic discovery:
            UserParameter=zabbix.partitioning.discovery[*], /usr/local/bin/zabbix_partitioning.py -c $1 --discovery
-           UserParameter=zabbix.partitioning.check[*], /usr/local/bin/zabbix_partitioning.py -c $1 --check-days $2
+           UserParameter=zabbix.partitioning.discovery[*], /usr/local/bin/zabbix_partitioning.py -c $1 --discovery
+           UserParameter=zabbix.partitioning.stats[*], /usr/local/bin/zabbix_partitioning.py -c $1 --stats $2
+           # Legacy check removed in favor of stats
         
         Or use Docker wrapper scripts.
       groups:
@@ -43,11 +45,32 @@ zabbix_export:
           description: 'Discover partitioned tables'
           item_prototypes:
             - uuid: 1fbff85191c244dca956be7a94bf08a3
-              name: 'Days remaining: {#TABLE}'
-              key: 'zabbix.partitioning.check[{$PATH.TO.CONFIG}, {#TABLE}]'
+              name: 'Partitioning Stats: {#TABLE}'
+              key: 'zabbix.partitioning.stats[{$PATH.TO.CONFIG}, {#TABLE}]'
               delay: 12h
+              history: '0'
+              trends: '0'
+              value_type: TEXT
+              description: 'JSON statistics for table {#TABLE}'
+              tags:
+                - tag: component
+                  value: partitioning
+                - tag: table
+                  value: '{#TABLE}'
+
+            - uuid: a8371234567890abcdef1234567890ab
+              name: 'Days remaining: {#TABLE}'
+              type: DEPENDENT
+              key: 'zabbix.partitioning.days_left[{#TABLE}]'
+              delay: 0
               history: 7d
               description: 'Days until the last partition runs out for {#TABLE}'
+              master_item:
+                key: 'zabbix.partitioning.stats[{$PATH.TO.CONFIG}, {#TABLE}]'
+              preprocessing:
+                - type: JSONPATH
+                  parameters:
+                    - $.days_left
               tags:
                 - tag: component
                   value: partitioning
@@ -55,11 +78,50 @@ zabbix_export:
                   value: '{#TABLE}'
               trigger_prototypes:
                 - uuid: da23fae76a41455c86c58267d6d9f86d
-                  expression: 'last(/Zabbix Partitioning Monitor/zabbix.partitioning.check[{$PATH.TO.CONFIG}, {#TABLE}])<={$PARTITION.DAYS}'
+                  expression: 'last(/Zabbix Partitioning Monitor/zabbix.partitioning.days_left[{#TABLE}])<={$PARTITION.DAYS}'
                   name: 'Partitioning critical: {#TABLE} has less than {$PARTITION.DAYS} days in partition'
                   opdata: 'Days till Zabbix server will crash: {ITEM.LASTVALUE}'
                   priority: DISASTER
                   description: 'New partitions are not being created. Check the script logs.'
+
+            - uuid: b9482345678901bcdef23456789012cd
+              name: 'Partition Count: {#TABLE}'
+              type: DEPENDENT
+              key: 'zabbix.partitioning.count[{#TABLE}]'
+              delay: 0
+              history: 7d
+              description: 'Total number of partitions for {#TABLE}'
+              master_item:
+                key: 'zabbix.partitioning.stats[{$PATH.TO.CONFIG}, {#TABLE}]'
+              preprocessing:
+                - type: JSONPATH
+                  parameters:
+                    - $.partition_count
+              tags:
+                - tag: component
+                  value: partitioning
+                - tag: table
+                  value: '{#TABLE}'
+
+            - uuid: c0593456789012cdef345678901234de
+              name: 'Table Size: {#TABLE}'
+              type: DEPENDENT
+              key: 'zabbix.partitioning.size[{#TABLE}]'
+              delay: 0
+              history: 7d
+              units: B
+              description: 'Total size (Data+Index) of {#TABLE}'
+              master_item:
+                key: 'zabbix.partitioning.stats[{$PATH.TO.CONFIG}, {#TABLE}]'
+              preprocessing:
+                - type: JSONPATH
+                  parameters:
+                    - $.size_bytes
+              tags:
+                - tag: component
+                  value: partitioning
+                - tag: table
+                  value: '{#TABLE}'
       macros:
         - macro: '{$PARTITION.DAYS}'
           value: '3'

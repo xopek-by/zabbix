@@ -35,9 +35,10 @@ class DatabaseError(Exception):
     pass
 
 class ZabbixPartitioner:
-    def __init__(self, config: Dict[str, Any], dry_run: bool = False):
+    def __init__(self, config: Dict[str, Any], dry_run: bool = False, fast_init: bool = False):
         self.config = config
         self.dry_run = dry_run
+        self.fast_init = fast_init
         self.conn = None
         self.logger = logging.getLogger('zabbix_partitioning')
         
@@ -385,12 +386,29 @@ class ZabbixPartitioner:
              self.logger.info(f"Table {table} is already partitioned.")
              return
 
-        init_strategy = self.config.get('initial_partitioning_start', 'db_min')
+        # init_strategy = self.config.get('initial_partitioning_start', 'db_min') # Removed in favor of flag
+        # but flag needs to be passed to this method or accessed from somewhere.
+        # Since I can't easily change signature without affecting calls, I'll pass it in kwargs or check self.fast_init if I add it to class.
+        pass
+        
+    def initialize_partitioning(self, table: str, period: str, premake: int, retention_str: str, fast_init: bool = False):
+        """Initial partitioning for a table (convert regular table to partitioned)."""
+        self.logger.info(f"Initializing partitioning for {table}")
+        
+        if self.has_incompatible_primary_key(table):
+             self.logger.error(f"Cannot partition {table}: Primary Key does not include 'clock' column.")
+             return
+
+        # If already partitioned, skip
+        if self.get_existing_partitions(table):
+             self.logger.info(f"Table {table} is already partitioned.")
+             return
+
         start_dt = None
         p_archive_ts = None
 
-        if init_strategy == 'retention':
-            self.logger.info(f"Strategy 'retention': Calculating start date from retention ({retention_str})")
+        if fast_init:
+            self.logger.info(f"Strategy 'fast-init': Calculating start date from retention ({retention_str})")
             retention_date = self.get_lookback_date(retention_str)
             # Start granular partitions from the retention date
             start_dt = self.truncate_date(retention_date, period)
@@ -481,6 +499,51 @@ class ZabbixPartitioner:
         diff = end_dt - now
         return max(0, diff.days)
 
+    def get_table_stats(self, table: str) -> Dict[str, Any]:
+        """
+        Get detailed statistics for a table:
+        - size_bytes (data + index)
+        - partition_count
+        - days_left (coverage)
+        """
+        # 1. Get Size
+        size_query = """
+            SELECT (DATA_LENGTH + INDEX_LENGTH) 
+            FROM information_schema.TABLES 
+            WHERE TABLE_SCHEMA = %s AND TABLE_NAME = %s
+        """
+        size_bytes = self.execute_query(size_query, (self.db_name, table), fetch='one')
+        
+        # 2. Get Partition Count
+        count_query = """
+            SELECT COUNT(*) 
+            FROM information_schema.PARTITIONS 
+            WHERE TABLE_SCHEMA = %s AND TABLE_NAME = %s AND PARTITION_NAME IS NOT NULL
+        """
+        p_count = self.execute_query(count_query, (self.db_name, table), fetch='one')
+        
+        # 3. Get Days Left
+        # We need the period first.
+        partitions_conf = self.config.get('partitions', {})
+        found_period = None
+        for period, tables in partitions_conf.items():
+            for item in tables:
+                if list(item.keys())[0] == table:
+                    found_period = period
+                    break
+            if found_period: break
+            
+        days_left = -1
+        if found_period:
+            days_left = self.check_partitions_coverage(table, found_period)
+            
+        return {
+            "table": table,
+            "size_bytes": int(size_bytes) if size_bytes is not None else 0,
+            "partition_count": int(p_count) if p_count is not None else 0,
+            "days_left": days_left
+        }
+
     def run(self, mode: str, target_table: str = None):
         """Main execution loop."""
         with self.connect_db():
@@ -517,6 +580,15 @@ class ZabbixPartitioner:
                 print(days_left)
                 return
 
+            # --- Stats Mode ---
+            if mode == 'stats':
+                if not target_table:
+                    raise ConfigurationError("Target table required for stats mode")
+                
+                stats = self.get_table_stats(target_table)
+                print(json.dumps(stats))
+                return
+
             # --- Normal Mode (Init/Maintain) ---
             self.check_compatibility()
             premake = self.config.get('premake', 10)
@@ -530,7 +602,7 @@ class ZabbixPartitioner:
                      retention = item[table]
                      
                      if mode == 'init':
-                         self.initialize_partitioning(table, period, premake, retention)
+                         self.initialize_partitioning(table, period, premake, retention, fast_init=self.fast_init)
                      else:
                          # Maintenance mode (Add new, remove old)
                          self.create_future_partitions(table, period, premake)
@@ -542,6 +614,106 @@ class ZabbixPartitioner:
 
             if mode != 'init' and not self.dry_run:
                 pass 
+
+def run_wizard():
+    print("Welcome to Zabbix Partitioning Wizard")
+    print("-------------------------------------")
+    
+    config = {
+        'database': {'type': 'mysql'},
+        'partitions': {'daily': [], 'weekly': [], 'monthly': []},
+        'logging': 'console',
+        'premake': 10,
+        'replicate_sql': False
+    }
+
+    # 1. Connection
+    print("\n[Database Connection]")
+    use_socket = input("Use Socket (s) or Address (a)? [s/a]: ").lower().strip() == 's'
+    if use_socket:
+        sock = input("Socket path [/var/run/mysqld/mysqld.sock]: ").strip() or '/var/run/mysqld/mysqld.sock'
+        config['database']['socket'] = sock
+        config['database']['host'] = 'localhost' # Fallback
+        config['database']['port'] = 3306
+    else:
+        host = input("Database Host [localhost]: ").strip() or 'localhost'
+        port_str = input("Database Port [3306]: ").strip() or '3306'
+        config['database']['host'] = host
+        config['database']['port'] = int(port_str)
+    
+    config['database']['user'] = input("Database User [zabbix]: ").strip() or 'zabbix'
+    config['database']['passwd'] = input("Database Password: ").strip()
+    config['database']['db'] = input("Database Name [zabbix]: ").strip() or 'zabbix'
+
+    # 2. Auditlog
+    print("\n[Auditlog]")
+    print("Note: To partition 'auditlog', ensure its Primary Key includes the 'clock' column.")
+    if input("Partition 'auditlog' table? [y/N]: ").lower().strip() == 'y':
+        ret = input("Auditlog retention (e.g. 365d) [365d]: ").strip() or '365d'
+        config['partitions']['weekly'].append({'auditlog': ret})
+
+    # 3. History Tables
+    # History tables list
+    history_tables = ['history', 'history_uint', 'history_str', 'history_log', 'history_text', 'history_bin']
+    
+    print("\n[History Tables]")
+    # Separate logic as requested
+    if input("Set SAME retention for all history tables? [Y/n]: ").lower().strip() != 'n':
+        ret = input("Retention for all history tables (e.g. 30d) [30d]: ").strip() or '30d'
+        for t in history_tables:
+            config['partitions']['daily'].append({t: ret})
+    else:
+        for t in history_tables:
+            ret = input(f"Retention for '{t}' (e.g. 30d, skip to ignore): ").strip()
+            if ret:
+                config['partitions']['daily'].append({t: ret})
+
+    # 4. Trends Tables
+    trends_tables = ['trends', 'trends_uint']
+    print("\n[Trends Tables]")
+    if input("Set SAME retention for all trends tables? [Y/n]: ").lower().strip() != 'n':
+        ret = input("Retention for all trends tables (e.g. 365d) [365d]: ").strip() or '365d'
+        for t in trends_tables:
+            config['partitions']['monthly'].append({t: ret})
+    else:
+        for t in trends_tables:
+            ret = input(f"Retention for '{t}' (e.g. 365d, skip to ignore): ").strip()
+            if ret:
+                config['partitions']['monthly'].append({t: ret})
+
+    # 5. Replication
+    print("\n[Replication]")
+    config['replicate_sql'] = input("Enable binary logging for replication? [y/N]: ").lower().strip() == 'y'
+
+    # 6. Premake
+    print("\n[Premake]")
+    pm = input("How many future partitions to create? [10]: ").strip()
+    config['premake'] = int(pm) if pm.isdigit() else 10
+    
+    # 7. Logging
+    print("\n[Logging]")
+    config['logging'] = 'syslog' if input("Log to syslog? [y/N]: ").lower().strip() == 'y' else 'console'
+    
+    # Save
+    print("\n[Output]")
+    path = input("Save config to [/etc/zabbix/zabbix_partitioning.conf]: ").strip() or '/etc/zabbix/zabbix_partitioning.conf'
+    
+    try:
+        # Create dir if not exists
+        folder = os.path.dirname(path)
+        if folder and not os.path.exists(folder):
+            try:
+                os.makedirs(folder)
+            except OSError:
+                print(f"Warning: Could not create directory {folder}. Saving to current directory.")
+                path = 'zabbix_partitioning.conf'
+
+        with open(path, 'w') as f:
+            yaml.dump(config, f, default_flow_style=False)
+        print(f"\nConfiguration saved to {path}")
+    except Exception as e:
+        print(f"Error saving config: {e}")
+        print(yaml.dump(config)) # dump to stdout if fails
 
 def setup_logging(config_log_type: str, verbose: bool = False):
     logger = logging.getLogger('zabbix_partitioning')
@@ -568,6 +740,12 @@ def parse_args():
     # Monitoring args
     parser.add_argument('--discovery', action='store_true', help='Output Zabbix LLD JSON')
     parser.add_argument('--check-days', type=str, help='Check days of future partitions left for table', metavar='TABLE')
+    parser.add_argument('--stats', type=str, help='Output detailed table statistics in JSON', metavar='TABLE')
+    
+    # Wizard & Flags
+    parser.add_argument('--wizard', action='store_true', help='Launch interactive configuration wizard')
+    parser.add_argument('--fast-init', action='store_true', help='Skip MIN(clock) check during init, start from retention')
+    
     parser.add_argument('-V', '--version', action='version', version=f'%(prog)s {VERSION}', help='Show version and exit')
     
     return parser.parse_args()
@@ -584,6 +762,10 @@ def main():
     args = parse_args()
     
     try:
+        if args.wizard:
+            run_wizard()
+            return
+
         conf_path = load_config(args.config)
         with open(conf_path, 'r') as f:
             config = yaml.safe_load(f)
@@ -602,10 +784,13 @@ def main():
         elif args.check_days:
             mode = 'check'
             target = args.check_days
+        elif args.stats:
+            mode = 'stats'
+            target = args.stats
         elif args.init: mode = 'init'
         
         # Setup logging
-        if mode in ['discovery', 'check']:
+        if mode in ['discovery', 'check', 'stats']:
              logging.basicConfig(level=logging.ERROR) # Only show critical errors
         else:
              setup_logging(config.get('logging', 'console'), verbose=args.verbose)
@@ -616,7 +801,7 @@ def main():
             logger.info("Starting in DRY-RUN mode")
         
         # ZabbixPartitioner expects dict config
-        app = ZabbixPartitioner(config, dry_run=args.dry_run)
+        app = ZabbixPartitioner(config, dry_run=args.dry_run, fast_init=args.fast_init)
         app.run(mode, target)
         
     except Exception as e:

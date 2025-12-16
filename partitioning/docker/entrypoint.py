@@ -105,6 +105,13 @@ def main():
              sys.exit(1)
         cmd.append('--check-days')
         cmd.append(target)
+    elif run_mode == 'stats':
+        target = os.getenv('CHECK_TARGET')
+        if not target:
+             print("Error: CHECK_TARGET env var required for stats mode")
+             sys.exit(1)
+        cmd.append('--stats')
+        cmd.append(target)
     
     print(f"Executing: {' '.join(cmd)}")
     result = subprocess.run(cmd)
