@@ -13,6 +13,7 @@ import argparse
 import pymysql
 from pymysql.constants import CLIENT
 import yaml
+import json
 import logging
 import logging.handlers
 from datetime import datetime, timedelta
@@ -443,12 +444,81 @@ class ZabbixPartitioner:
         self.logger.info(f"Applying initial partitioning to {table} ({len(parts_sql)} partitions)")
         self.execute_query(query)
 
-    def run(self, mode: str):
+    def discovery(self):
+        """Output Zabbix Low-Level Discovery logic JSON."""
+        partitions_conf = self.config.get('partitions', {})
+        discovery_data = []
+        
+        for period, tables in partitions_conf.items():
+            if not tables:
+                continue
+            for item in tables:
+                table = list(item.keys())[0]
+                discovery_data.append({"{#TABLE}": table, "{#PERIOD}": period})
+        
+        print(json.dumps(discovery_data))
+
+    def check_partitions_coverage(self, table: str, period: str) -> int:
+        """
+        Check how many days of future partitions exist for a table.
+        Returns: Number of days from NOW until the end of the last partition.
+        """
+        top_partition_ts = self.execute_query(
+            """SELECT MAX(`partition_description`) FROM `information_schema`.`partitions`
+               WHERE `table_schema` = %s AND `table_name` = %s AND `partition_name` IS NOT NULL""",
+            (self.db_name, table), fetch='one'
+        )
+        
+        if not top_partition_ts:
+            return 0
+        
+        # partition_description is "VALUES LESS THAN (TS)"
+        # So it represents the END of the partition (start of next)
+        end_ts = int(top_partition_ts)
+        end_dt = datetime.fromtimestamp(end_ts)
+        now = datetime.now()
+        
+        diff = end_dt - now
+        return max(0, diff.days)
+
+    def run(self, mode: str, target_table: str = None):
         """Main execution loop."""
         with self.connect_db():
-            self.check_compatibility()
-            
             partitions_conf = self.config.get('partitions', {})
+            
+            # --- Discovery Mode ---
+            if mode == 'discovery':
+                self.discovery()
+                return
+
+            # --- Check Mode ---
+            if mode == 'check':
+                if not target_table:
+                    # Check all and print simple status? Or error?
+                    # Zabbix usually queries one by one.
+                    # Implementing simple check which returns days for specific table
+                    raise ConfigurationError("Target table required for check mode")
+                
+                # Find period for table
+                found_period = None
+                for period, tables in partitions_conf.items():
+                    for item in tables:
+                        if list(item.keys())[0] == target_table:
+                            found_period = period
+                            break
+                    if found_period: break
+                
+                if not found_period:
+                     # Table not in config?
+                     print("-1") # Error code
+                     return
+
+                days_left = self.check_partitions_coverage(target_table, found_period)
+                print(days_left)
+                return
+
+            # --- Normal Mode (Init/Maintain) ---
+            self.check_compatibility()
             premake = self.config.get('premake', 10)
             
             if mode == 'delete':
@@ -473,8 +543,10 @@ class ZabbixPartitioner:
             
             # Housekeeping extras
             if mode != 'init' and not self.dry_run:
-                # delete_extra_data logic...
-                pass # Can add back specific cleanups like `sessions` table if desired
+                 self.logger.info("Partitioning completed successfully")
+
+            if mode != 'init' and not self.dry_run:
+                pass 
 
 def setup_logging(config_log_type: str):
     logger = logging.getLogger('zabbix_partitioning')
@@ -484,7 +556,7 @@ def setup_logging(config_log_type: str):
     
     if config_log_type == 'syslog':
         handler = logging.handlers.SysLogHandler(address='/dev/log')
-        formatter = logging.Formatter('%(name)s: %(message)s') # Syslog has its own timestamps usually
+        formatter = logging.Formatter('%(name)s: %(message)s') 
     else:
         handler = logging.StreamHandler(sys.stdout)
         
@@ -497,6 +569,11 @@ def parse_args():
     parser.add_argument('-i', '--init', action='store_true', help='Initialize partitions')
     parser.add_argument('-d', '--delete', action='store_true', help='Remove partitions (Not implemented)')
     parser.add_argument('--dry-run', action='store_true', help='Simulate queries')
+    
+    # Monitoring args
+    parser.add_argument('--discovery', action='store_true', help='Output Zabbix LLD JSON')
+    parser.add_argument('--check-days', type=str, help='Check days of future partitions left for table', metavar='TABLE')
+    
     return parser.parse_args()
 
 def load_config(path):
@@ -515,20 +592,47 @@ def main():
         with open(conf_path, 'r') as f:
             config = yaml.safe_load(f)
             
-        setup_logging(config.get('logging', 'console'))
-        logger = logging.getLogger('zabbix_partitioning')
+        # For discovery/check, we might want minimal logging or specific output, so we handle that in run()
+        # But we still need basic logging setup for db errors
         
         mode = 'maintain'
-        if args.init: mode = 'init'
+        target = None
+        
+        if args.discovery:
+            mode = 'discovery'
+            config['logging'] = 'console' # Force console for discovery? Or suppress?
+            # actually we don't want logs mixing with JSON output
+            # so checking mode before setup logging
+        elif args.check_days:
+            mode = 'check'
+            target = args.check_days
+        elif args.init: mode = 'init'
         elif args.delete: mode = 'delete'
+        
+        # Setup logging
+        # If discovery or check, we mute info logs to stdout to keep output clean, 
+        # unless errors happen.
+        if mode in ['discovery', 'check']:
+             logging.basicConfig(level=logging.ERROR) # Only show critical errors
+        else:
+             setup_logging(config.get('logging', 'console'))
+             
+        logger = logging.getLogger('zabbix_partitioning')
         
         if args.dry_run:
             logger.info("Starting in DRY-RUN mode")
-            
+        
+        # ZabbixPartitioner expects dict config
         app = ZabbixPartitioner(config, dry_run=args.dry_run)
-        app.run(mode)
+        app.run(mode, target)
         
     except Exception as e:
+        # Important: Zabbix log monitoring needs to see "Failed"
+        # We print to stderr for script failure, logging handles log file
+        try:
+             logging.getLogger('zabbix_partitioning').critical(f"Partitioning failed: {e}")
+        except:
+             pass
         print(f"Critical Error: {e}", file=sys.stderr)
         sys.exit(1)
 

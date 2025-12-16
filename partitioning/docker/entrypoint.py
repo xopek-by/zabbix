@@ -81,13 +81,13 @@ def generate_config():
     print("Generated Configuration:")
     print(yaml.dump(config, default_flow_style=False))
     
-    with open('/etc/zabbix_partitioning.conf', 'w') as f:
+    with open('/etc/zabbix/zabbix_partitioning.conf', 'w') as f:
         yaml.dump(config, f, default_flow_style=False)
 
 def main():
     generate_config()
     
-    cmd = [sys.executable, '/usr/local/bin/zabbix_partitioning.py', '-c', '/etc/zabbix_partitioning.conf']
+    cmd = [sys.executable, '/usr/local/bin/zabbix_partitioning.py', '-c', '/etc/zabbix/zabbix_partitioning.conf']
     
     run_mode = os.getenv('RUN_MODE', 'maintenance')
     if run_mode == 'init':
@@ -96,6 +96,15 @@ def main():
         cmd.append('--dry-run')
         if os.getenv('DRY_RUN_INIT') == 'true':
              cmd.append('--init')
+    elif run_mode == 'discovery':
+        cmd.append('--discovery')
+    elif run_mode == 'check':
+        target = os.getenv('CHECK_TARGET')
+        if not target:
+             print("Error: CHECK_TARGET env var required for check mode")
+             sys.exit(1)
+        cmd.append('--check-days')
+        cmd.append(target)
     
     print(f"Executing: {' '.join(cmd)}")
     result = subprocess.run(cmd)

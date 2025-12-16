@@ -7,15 +7,19 @@ database:
     db: zabbix
     # Port mapping in docker-compose is 33060
     port: 33060
-
 partitions:
+    # daily: Partitions created daily
     daily:
         - history: 7d
         - history_uint: 7d
         - history_str: 7d
-        - history_log: 7d
         - history_text: 7d
         - history_bin: 7d
+    # weekly: Partitions created weekly
+    weekly:
+        - history_log: 7d
+    # monthly: Partitions created monthly
+    monthly:
         - trends: 365d
         - trends_uint: 365d
 
