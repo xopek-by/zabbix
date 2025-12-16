@@ -267,8 +267,64 @@ docker run --rm \
 | `RETENTION_TRENDS` | 365d | Retention for `trends*` tables |
 | `RETENTION_AUDIT` | 365d | Retention for `auditlog` (if enabled) |
 | `ENABLE_AUDITLOG_PARTITIONING` | false | Set to `true` to partition `auditlog` |
-| `RUN_MODE` | maintenance | `init` (initialize), `maintenance` (daily run), or `dry-run` |
+| `RUN_MODE` | maintenance | `init`, `maintenance`, `dry-run`, `discovery`, `check` |
+| `CHECK_TARGET` | - | Required if `RUN_MODE=check`. Table name to check (e.g. `history`). |
 | `PARTITION_DAILY_[TABLE]` | - | Custom daily retention (e.g., `PARTITION_DAILY_mytable=30d`) |
 | `PARTITION_WEEKLY_[TABLE]` | - | Custom weekly retention |
 | `PARTITION_MONTHLY_[TABLE]` | - | Custom monthly retention |
+
+#### Scenario F: Monitoring (Discovery)
+Output Zabbix LLD JSON for table discovery.
+```bash
+docker run --rm \
+  -e DB_HOST=zabbix-db \
+  -e RUN_MODE=discovery \
+  zabbix-partitioning
+```
+
+#### Scenario G: Monitoring (Health Check)
+Check days remaining for a specific table (e.g., `history`). Returns integer days.
+```bash
+docker run --rm \
+  -e DB_HOST=zabbix-db \
+  -e RUN_MODE=check \
+  -e CHECK_TARGET=history \
+  zabbix-partitioning
+```
+
+---
+
+## 10. Monitoring
+The script includes built-in features for monitoring the health of your partitions via Zabbix.
+
+### 10.1 CLI Usage
+- **Discovery (LLD)**:
+  ```bash
+  ./zabbix_partitioning.py --discovery
+  # Output: [{"{#TABLE}": "history", "{#PERIOD}": "daily"}, ...]
+  ```
+- **Check Days**:
+  ```bash
+  ./zabbix_partitioning.py --check-days history
+  # Output: 30 (integer days remaining)
+  ```
+- **Version**:
+  ```bash
+  ./zabbix_partitioning.py --version
+  # Output: zabbix_partitioning.py 0.3.1-test
+  ```
+
+### 10.2 Zabbix Template
+A Zabbix 7.0 template is provided: `zabbix_partitioning_template.yaml`.
+
+**Setup**:
+1.  Import the YAML template into Zabbix.
+2.  Install the script on the Zabbix Server or Proxy.
+3.  Add the `UserParameter` commands to your Zabbix Agent config (see Template description).
+4.  Link the template to the host running the script.
+
+**Features**:
+- **Discovery**: Automatically finds all partitioned tables.
+- **Triggers**: Alerts if a table has less than 3 days of future partitions pre-created.
+- **Log Monitoring**: Alerts on script execution failures.
 
