@@ -5,6 +5,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.1] - 2025-12-16
+### Added
+- **CLI**: Added `--verbose` / `-v` flag to switch between INFO (default) and DEBUG logging levels.
+- **CLI**: Added `-r` short flag for `--dry-run`.
+
 ## [0.4.0] - 2025-12-16
 ### Added
 - **Monitoring**: Added `--discovery` argument for Zabbix Low-Level Discovery (LLD) of partitioned tables.

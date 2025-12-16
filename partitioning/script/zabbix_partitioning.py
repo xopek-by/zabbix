@@ -21,7 +21,7 @@ from typing import Optional, Dict, List, Any, Union, Tuple
 from contextlib import contextmanager
 
 # Semantic Versioning
-VERSION = '0.4.0'
+VERSION = '0.4.1'
 
 # Constants
 PART_PERIOD_REGEX = r'([0-9]+)(h|d|m|y)'
@@ -543,9 +543,9 @@ class ZabbixPartitioner:
             if mode != 'init' and not self.dry_run:
                 pass 
 
-def setup_logging(config_log_type: str):
+def setup_logging(config_log_type: str, verbose: bool = False):
     logger = logging.getLogger('zabbix_partitioning')
-    logger.setLevel(logging.DEBUG)
+    logger.setLevel(logging.DEBUG if verbose else logging.INFO)
     
     formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
     
@@ -562,7 +562,8 @@ def parse_args():
     parser = argparse.ArgumentParser(description='Zabbix Partitioning Manager')
     parser.add_argument('-c', '--config', default='/etc/zabbix/zabbix_partitioning.conf', help='Config file path')
     parser.add_argument('-i', '--init', action='store_true', help='Initialize partitions')
-    parser.add_argument('--dry-run', action='store_true', help='Simulate queries')
+    parser.add_argument('-r', '--dry-run', action='store_true', help='Simulate queries')
+    parser.add_argument('-v', '--verbose', action='store_true', help='Enable debug logging')
     
     # Monitoring args
     parser.add_argument('--discovery', action='store_true', help='Output Zabbix LLD JSON')
@@ -604,12 +605,10 @@ def main():
         elif args.init: mode = 'init'
         
         # Setup logging
-        # If discovery or check, we mute info logs to stdout to keep output clean, 
-        # unless errors happen.
         if mode in ['discovery', 'check']:
              logging.basicConfig(level=logging.ERROR) # Only show critical errors
         else:
-             setup_logging(config.get('logging', 'console'))
+             setup_logging(config.get('logging', 'console'), verbose=args.verbose)
              
         logger = logging.getLogger('zabbix_partitioning')
         
