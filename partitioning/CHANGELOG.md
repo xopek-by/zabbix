@@ -19,10 +19,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.3.0] - 2025-12-14
 ### Changed
 - **Refactor**: Complete rewrite of `zabbix_partitioning.py` using Class-based structure (`ZabbixPartitioner`).
-- **Configuration**: Switched to YAML configuration file (`zabbix_partitioning.conf`).
-- **Safety**: Added checks to prevent partitioning of tables incompatible with Zabbix 7.0 schema (e.g., `auditlog` without `clock` in PK).
-- **Docker**: Introduced Docker container support (`Dockerfile`, `entrypoint.py`).
+- **Configuration**: Extended comments in the configuration file (`zabbix_partitioning.conf`). The config file is self-explanatory now.
+- **Docker**: Introduced Docker container support (`Dockerfile`, `entrypoint.py`). The script can be run in a stateless manner using Docker.
 
 ### Added
 - **Optimization**: Added `initial_partitioning_start` option (`db_min` vs `retention`) to speed up initialization on large DBs.
-- **Reliability**: Use `pymysql` with robust connection handling and SSL support.
