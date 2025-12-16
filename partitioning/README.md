@@ -65,10 +65,26 @@ partitions:
         # ... add other options as needed. Please check the config file for more options.
 ```
 
-### Important Notes:
-- **`replicate_sql`**:
-  - `False` (Default): Partitioning maintenance commands are NOT replicated to slaves. Recommended if you manage partitions separately on each node or want to reduce replication lag.
-  - `True`: Commands are replicated.
+### Configuration Parameters
+- **`partitions`**: Defines your retention policy globally.
+  - Syntax: `period: [ {table: retention_period}, ... ]`
+  - **`daily`**: Partitions are created for each day.
+  - **`weekly`**: Partitions are created for each week.
+  - **`monthly`**: Partitions are created for each month.
+  - **`yearly`**: Partitions are created for each year. 
+  - Retention Format: `14d` (days), `12w` (weeks), `12m` (months), `1y` (years).
+
+- **`initial_partitioning_start`**: Controls how the very FIRST partition is determined during initialization (`--init` mode).
+  - `db_min`: (Default) Queries the table for the oldest record (`MIN(clock)`). Accurate but **slow** on large tables.
+  - `retention`: (Recommended for large DBs) Skips the query. Calculates the start date as `Now - Retention Period`. Creates a single `p_archive` partition for all data older than that date.
+
+- **`premake`**: Number of future partitions to create in advance.
+  - Default: `10`. Ensures you have a buffer if the script fails to run for a few days.
+
+- **`replicate_sql`**: Controls MySQL Binary Logging for partitioning commands.
+  - `False`: (Default) Disables binary logging (`SET SESSION sql_log_bin = 0`). Partition creation/dropping is **NOT** replicated to slaves. Useful if you want to manage partitions independently on each node or avoid replication lag storms.
+  - `True`: Commands are replicated. Use this if you want absolute schema consistency across your cluster automatically.
+
 - **`auditlog`**:
   - In Zabbix 7.0+, the `auditlog` table does **not** have the `clock` column in its Primary Key by default. **Do not** add it to the config unless you have manually altered the table schema.
 
