@@ -2,7 +2,7 @@ zabbix_export:
   version: '7.0'
   template_groups:
     - uuid: e29f7cbf75cf41cb81078cb4c10d584a
-      name: 'Templates/Databases'
+      name: Templates/Databases
   templates:
     - uuid: 69899eb3126b4c62b70351f305b69dd9
       template: 'Zabbix Partitioning Monitor'
@@ -16,39 +16,35 @@ zabbix_export:
            UserParameter=zabbix.partitioning.check[*], /usr/local/bin/zabbix_partitioning.py -c $1 --check-days $2
         
         Or use Docker wrapper scripts.
-        
       groups:
-        - name: 'Templates/Databases'
+        - name: Templates/Databases
       items:
         - uuid: bc753e750cc2485f917ba1f023c87d05
           name: 'Partitioning Last Run Status'
-          type: TRAP
-          key: partitioning.run.status
-          delay: 0
+          type: ZABBIX_ACTIVE
+          key: 'log[/var/log/syslog,zabbix_partitioning]'
           history: 7d
+          value_type: LOG
           trends: '0'
-          value_type: TEXT
-          description: 'Send "Success" or "Failed" via zabbix_sender or check log file'
           triggers:
             - uuid: 25497978dbb943e49dac8f3b9db91c29
-              expression: 'find(/Zabbix Partitioning Monitor/partitioning.run.status,,"like","Failed")=1'
-              name: 'Zabbix Partitioning Failed'
+              expression: 'find(/Zabbix Partitioning Monitor/log[/var/log/syslog,zabbix_partitioning],,"like","Failed")=1'
+              name: 'Partitioning Script Failed'
               priority: HIGH
               description: 'The partitioning script reported a failure.'
               tags:
                 - tag: services
                   value: database
-
       discovery_rules:
         - uuid: 097c96467035468a80ce5c519b0297bb
           name: 'Partitioning Discovery'
-          key: 'zabbix.partitioning.discovery[/etc/zabbix/zabbix_partitioning.conf]'
-          delay: 1h
+          key: 'zabbix.partitioning.discovery[{$PATH.TO.CONFIG}]'
+          delay: 1d
           description: 'Discover partitioned tables'
           item_prototypes:
             - uuid: 1fbff85191c244dca956be7a94bf08a3
-              name: 'Partitions remaining: {#TABLE}'
-              key: 'zabbix.partitioning.check[/etc/zabbix/zabbix_partitioning.conf, {#TABLE}]'
+              name: 'Days remaining: {#TABLE}'
+              key: 'zabbix.partitioning.check[{$PATH.TO.CONFIG}, {#TABLE}]'
               delay: 12h
               history: 7d
               description: 'Days until the last partition runs out for {#TABLE}'
@@ -59,7 +55,13 @@ zabbix_export:
                   value: '{#TABLE}'
               trigger_prototypes:
                 - uuid: da23fae76a41455c86c58267d6d9f86d
-                  expression: 'last(/Zabbix Partitioning Monitor/zabbix.partitioning.check[/etc/zabbix/zabbix_partitioning.conf, {#TABLE}])<=3'
-                  name: 'Partitioning critical: {#TABLE} has less than 3 days of partitions'
-                  priority: HIGH
+                  expression: 'last(/Zabbix Partitioning Monitor/zabbix.partitioning.check[{$PATH.TO.CONFIG}, {#TABLE}])<={$PARTITION.DAYS}'
+                  name: 'Partitioning critical: {#TABLE} has less than {$PARTITION.DAYS} days in partition'
+                  opdata: 'Days till Zabbix server will crash: {ITEM.LASTVALUE}'
+                  priority: DISASTER
                   description: 'New partitions are not being created. Check the script logs.'
+      macros:
+        - macro: '{$PARTITION.DAYS}'
+          value: '3'
+        - macro: '{$PATH.TO.CONFIG}'
+          value: /etc/zabbix/scripts/zabbix_partitioning.conf
