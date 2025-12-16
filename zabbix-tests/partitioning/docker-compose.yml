@@ -1,0 +1,14 @@
+services:
+  zabbix-db:
+    image: mysql:8.0
+    container_name: zabbix-partition-test
+    environment:
+      MYSQL_ROOT_PASSWORD: root_password
+      MYSQL_DATABASE: zabbix
+      MYSQL_USER: zbx_part
+      MYSQL_PASSWORD: zbx_password
+    volumes:
+      - ../../partitioning/schemas/70-schema-mysql.txt:/docker-entrypoint-initdb.d/schema.sql
+    ports:
+      - "33060:3306"
+    command: --default-authentication-plugin=mysql_native_password

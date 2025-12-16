@@ -1,0 +1,25 @@
+database:
+    type: mysql
+    host: 127.0.0.1
+    socket: 
+    user: root
+    passwd: root_password
+    db: zabbix
+    # Port mapping in docker-compose is 33060
+    port: 33060
+
+partitions:
+    daily:
+        - history: 7d
+        - history_uint: 7d
+        - history_str: 7d
+        - history_log: 7d
+        - history_text: 7d
+        - history_bin: 7d
+        - trends: 365d
+        - trends_uint: 365d
+
+logging: console
+premake: 2
+replicate_sql: False
+initial_partitioning_start: retention
