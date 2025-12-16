@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.0] - 2025-12-16
+### Added
+- **Wizard**: Added interactive configuration wizard (`--wizard`).
+- **CLI**: Added `--fast-init` flag to skip table scanning during initialization, instead of config option.
+- **Monitoring**: Added `--stats` argument to output JSON statistics (Size, Count, Days Left).
+- **Template**: Updated `zabbix_mysql_partitioning_template.yaml` to use Master/Dependent items for efficient stats collection.
+
+### Changed
+- **Config**: Removed `initial_partitioning_start` from configuration file (moved to `--fast-init`).
+- **Template**: Replaced legacy check item with comprehensive stats master item.
+
 ## [0.4.1] - 2025-12-16
 ### Added
 - **CLI**: Added `--verbose` / `-v` flag to switch between INFO (default) and DEBUG logging levels.

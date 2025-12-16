@@ -21,7 +21,7 @@ from typing import Optional, Dict, List, Any, Union, Tuple
 from contextlib import contextmanager
 
 # Semantic Versioning
-VERSION = '0.4.1'
+VERSION = '0.5.0'
 
 # Constants
 PART_PERIOD_REGEX = r'([0-9]+)(h|d|m|y)'
