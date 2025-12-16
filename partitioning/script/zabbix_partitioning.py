@@ -1,9 +1,8 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Zabbix Database Partitioning Management Script
+Zabbix MySQL Partitioning Management Script
 
-Refactored for Zabbix 7.x compatibility, better maintainability, and standard logging.
 """
 
 import os
@@ -554,31 +553,9 @@ class ZabbixPartitioner:
                 self.discovery()
                 return
 
-            # --- Check Mode ---
-            if mode == 'check':
-                if not target_table:
-                    # Check all and print simple status? Or error?
-                    # Zabbix usually queries one by one.
-                    # Implementing simple check which returns days for specific table
-                    raise ConfigurationError("Target table required for check mode")
-                
-                # Find period for table
-                found_period = None
-                for period, tables in partitions_conf.items():
-                    for item in tables:
-                        if list(item.keys())[0] == target_table:
-                            found_period = period
-                            break
-                    if found_period: break
-                
-                if not found_period:
-                     # Table not in config?
-                     print("-1") # Error code
-                     return
+            # --- Check Mode (Legacy Removed) ---
+            # Use --stats instead for monitoring
 
-                days_left = self.check_partitions_coverage(target_table, found_period)
-                print(days_left)
-                return
 
             # --- Stats Mode ---
             if mode == 'stats':
@@ -731,22 +708,41 @@ def setup_logging(config_log_type: str, verbose: bool = False):
     logger.addHandler(handler)
 
 def parse_args():
-    parser = argparse.ArgumentParser(description='Zabbix Partitioning Manager')
-    parser.add_argument('-c', '--config', default='/etc/zabbix/zabbix_partitioning.conf', help='Config file path')
-    parser.add_argument('-i', '--init', action='store_true', help='Initialize partitions')
-    parser.add_argument('-r', '--dry-run', action='store_true', help='Simulate queries')
-    parser.add_argument('-v', '--verbose', action='store_true', help='Enable debug logging')
+    parser = argparse.ArgumentParser(
+        description='Zabbix Database Partitioning Management',
+        epilog='''
+Examples:
+  # 1. Interactive Configuration (Beginner)
+  %(prog)s --wizard
+
+  # 2. Initialization (First Run)
+  #    Use --fast-init to skip slow table scans on large DBs.
+  %(prog)s --init --fast-init
+
+  # 3. Regular Maintenance (Cron/Systemd)
+  #    Creates future partitions and drops old ones.
+  %(prog)s
+
+  # 4. Monitoring (Zabbix Integration)
+  #    Discovery (LLD): %(prog)s --discovery
+  #    Statistics (JSON): %(prog)s --stats history
+''',
+        formatter_class=argparse.RawDescriptionHelpFormatter
+    )
+    parser.add_argument('--config','-c', default='/etc/zabbix/zabbix_partitioning.conf', help='Path to configuration file')
+    parser.add_argument('--init', '-i', action='store_true', help='Initialize partitions (Convert standard tables)')
+    parser.add_argument('--dry-run', '-r', action='store_true', help='Simulate queries without executing them')
+    parser.add_argument('--verbose', '-v', action='store_true', help='Enable debug logging')
     
     # Monitoring args
-    parser.add_argument('--discovery', action='store_true', help='Output Zabbix LLD JSON')
-    parser.add_argument('--check-days', type=str, help='Check days of future partitions left for table', metavar='TABLE')
-    parser.add_argument('--stats', type=str, help='Output detailed table statistics in JSON', metavar='TABLE')
+    parser.add_argument('--discovery', action='store_true', help='Output Zabbix Low-Level Discovery (LLD) JSON (Required for template)')
+    parser.add_argument('--stats', type=str, help='Output table statistics (Size, Count, Usage) in JSON', metavar='TABLE')
     
     # Wizard & Flags
     parser.add_argument('--wizard', action='store_true', help='Launch interactive configuration wizard')
-    parser.add_argument('--fast-init', action='store_true', help='Skip MIN(clock) check during init, start from retention')
+    parser.add_argument('--fast-init', action='store_true', help='Skip MIN(clock) check during init (Start from retention period)')
     
-    parser.add_argument('-V', '--version', action='version', version=f'%(prog)s {VERSION}', help='Show version and exit')
+    parser.add_argument('--version', '-V', action='version', version=f'%(prog)s {VERSION}', help='Show version and exit')
     
     return parser.parse_args()
 
@@ -781,9 +777,6 @@ def main():
             config['logging'] = 'console' # Force console for discovery? Or suppress?
             # actually we don't want logs mixing with JSON output
             # so checking mode before setup logging
-        elif args.check_days:
-            mode = 'check'
-            target = args.check_days
         elif args.stats:
             mode = 'stats'
             target = args.stats

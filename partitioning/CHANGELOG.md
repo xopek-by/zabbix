@@ -15,6 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 - **Config**: Removed `initial_partitioning_start` from configuration file (moved to `--fast-init`).
 - **Template**: Replaced legacy check item with comprehensive stats master item.
+- **CLI**: Removed legacy `--check-days` argument (replaced by `--stats`).
 
 ## [0.4.1] - 2025-12-16
 ### Added
