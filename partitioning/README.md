@@ -62,7 +62,7 @@ partitions:
         - history: 14d
         - history_uint: 14d
         - trends: 365d
-        # ... add other tables as needed
+        # ... add other options as needed. Please check the config file for more options.
 ```
 
 ### Important Notes:
