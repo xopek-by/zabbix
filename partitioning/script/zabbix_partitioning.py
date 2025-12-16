@@ -21,7 +21,7 @@ from typing import Optional, Dict, List, Any, Union, Tuple
 from contextlib import contextmanager
 
 # Semantic Versioning
-VERSION = '0.3.0'
+VERSION = '0.4.0'
 
 # Constants
 PART_PERIOD_REGEX = r'([0-9]+)(h|d|m|y)'
@@ -521,11 +521,6 @@ class ZabbixPartitioner:
             self.check_compatibility()
             premake = self.config.get('premake', 10)
             
-            if mode == 'delete':
-                self.logger.warning("Delete Mode: Removing ALL partitioning from configured tables is not fully implemented in refactor yet.")
-                # Implement if needed, usually just ALTER TABLE REMOVE PARTITIONING
-                return
-
             for period, tables in partitions_conf.items():
                 if not tables:
                     continue
@@ -567,12 +562,12 @@ def parse_args():
     parser = argparse.ArgumentParser(description='Zabbix Partitioning Manager')
     parser.add_argument('-c', '--config', default='/etc/zabbix/zabbix_partitioning.conf', help='Config file path')
     parser.add_argument('-i', '--init', action='store_true', help='Initialize partitions')
-    parser.add_argument('-d', '--delete', action='store_true', help='Remove partitions (Not implemented)')
     parser.add_argument('--dry-run', action='store_true', help='Simulate queries')
     
     # Monitoring args
     parser.add_argument('--discovery', action='store_true', help='Output Zabbix LLD JSON')
     parser.add_argument('--check-days', type=str, help='Check days of future partitions left for table', metavar='TABLE')
+    parser.add_argument('-V', '--version', action='version', version=f'%(prog)s {VERSION}', help='Show version and exit')
     
     return parser.parse_args()
 
@@ -607,7 +602,6 @@ def main():
             mode = 'check'
             target = args.check_days
         elif args.init: mode = 'init'
-        elif args.delete: mode = 'delete'
         
         # Setup logging
         # If discovery or check, we mute info logs to stdout to keep output clean, 
