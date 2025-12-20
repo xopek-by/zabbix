@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Zabbix MySQL Partitioning Management Script
+Zabbix MySQL Partitioning Script
 
 """
 
@@ -20,7 +20,7 @@ from typing import Optional, Dict, List, Any, Union, Tuple
 from contextlib import contextmanager
 
 # Semantic Versioning
-VERSION = '0.5.0'
+VERSION = '0.6.0'
 
 # Constants
 PART_PERIOD_REGEX = r'([0-9]+)(h|d|m|y)'
@@ -73,7 +73,12 @@ class ZabbixPartitioner:
                 connect_args['host'] = self.db_host
             
             if self.db_ssl:
-                connect_args['ssl'] = self.db_ssl
+                if self.db_ssl is True or (isinstance(self.db_ssl, str) and self.db_ssl.lower() == 'required'):
+                    # Enable SSL with default context (uses system CAs)
+                    # Useful for Cloud DBs (Azure, AWS) that require TLS by default
+                    connect_args['ssl'] = {}
+                else:
+                    connect_args['ssl'] = self.db_ssl
                 # PyMySQL SSL options
                 # Note: valid ssl keys for PyMySQL are 'ca', 'capath', 'cert', 'key', 'cipher', 'check_hostname'
             
@@ -176,9 +181,11 @@ class ZabbixPartitioner:
         """
         Calculate the retention date based on config string (e.g., "30d", "12m").
         """
+        # Ensure string
+        period_str = str(period_str)
         match = re.search(PART_PERIOD_REGEX, period_str)
         if not match:
-            raise ConfigurationError(f"Invalid period format: {period_str}")
+            raise ConfigurationError(f"Invalid period format: '{period_str}' (Expected format like 30d, 12w, 1y)")
         
         amount = int(match.group(1))
         unit = match.group(2)
@@ -232,16 +239,27 @@ class ZabbixPartitioner:
             raise DatabaseError("Could not determine MySQL version")
         
         # MySQL 8.0+ supports partitioning natively
-        # (Assuming MySQL 8+ or MariaDB 10+ for modern Zabbix)
         self.logger.info(f"MySQL Version: {version_str}")
         
-        # 2. Check Zabbix DB Version (optional info)
+        # 2. Check Zabbix DB Version
         try:
             mandatory = self.execute_query('SELECT `mandatory` FROM `dbversion`', fetch='one')
             if mandatory:
                  self.logger.info(f"Zabbix DB Mandatory Version: {mandatory}")
         except Exception:
              self.logger.warning("Could not read 'dbversion' table. Is this a Zabbix DB?")
+
+    def validate_table_exists(self, table: str) -> bool:
+        """Return True if table exists in the database."""
+        # Use simple select from information_schema
+        exists = self.execute_query(
+            "SELECT 1 FROM information_schema.tables WHERE table_schema = %s AND table_name = %s",
+            (self.db_name, table), fetch='one'
+        )
+        if not exists:
+            self.logger.error(f"Table '{table}' does NOT exist in database '{self.db_name}'. Skipped.")
+            return False
+        return True
 
     def get_table_min_clock(self, table: str) -> Optional[datetime]:
         ts = self.execute_query(f"SELECT MIN(`clock`) FROM `{table}`", fetch='one')
@@ -372,94 +390,130 @@ class ZabbixPartitioner:
         for name in to_drop:
             self.execute_query(f"ALTER TABLE `{table}` DROP PARTITION {name}")
 
-    def initialize_partitioning(self, table: str, period: str, premake: int, retention_str: str):
-        """Initial partitioning for a table (convert regular table to partitioned)."""
-        self.logger.info(f"Initializing partitioning for {table}")
-        
+
+
+    def _check_init_prerequisites(self, table: str) -> bool:
+        """Return True if partitioning can proceed."""
         if self.has_incompatible_primary_key(table):
              self.logger.error(f"Cannot partition {table}: Primary Key does not include 'clock' column.")
-             return
-
-        # If already partitioned, skip
+             return False
         if self.get_existing_partitions(table):
              self.logger.info(f"Table {table} is already partitioned.")
-             return
-
-        # init_strategy = self.config.get('initial_partitioning_start', 'db_min') # Removed in favor of flag
-        # but flag needs to be passed to this method or accessed from somewhere.
-        # Since I can't easily change signature without affecting calls, I'll pass it in kwargs or check self.fast_init if I add it to class.
-        pass
+             return False
         
-    def initialize_partitioning(self, table: str, period: str, premake: int, retention_str: str, fast_init: bool = False):
-        """Initial partitioning for a table (convert regular table to partitioned)."""
-        self.logger.info(f"Initializing partitioning for {table}")
+        # Disk Space & Lock Warning
+        msg = (
+            f"WARNING: Partitioning table '{table}' requires creating a copy of the table.\n"
+            f"         Ensure you have free disk space >= Data_Length + Index_Length (approx 2x table size).\n"
+            f"         For large databases, this operation may take SEVERAL HOURS to complete."
+        )
+        self.logger.warning(msg)
         
-        if self.has_incompatible_primary_key(table):
-             self.logger.error(f"Cannot partition {table}: Primary Key does not include 'clock' column.")
-             return
+        # Interactive Check
+        if sys.stdin.isatty():
+             print(f"\n{msg}")
+             if input("Do you have enough free space and is Zabbix stopped? [y/N]: ").lower().strip() != 'y':
+                 self.logger.error("Initialization aborted by user.")
+                 return False
 
-        # If already partitioned, skip
-        if self.get_existing_partitions(table):
-             self.logger.info(f"Table {table} is already partitioned.")
-             return
+        return True
 
-        start_dt = None
-        p_archive_ts = None
-
-        if fast_init:
-            self.logger.info(f"Strategy 'fast-init': Calculating start date from retention ({retention_str})")
-            retention_date = self.get_lookback_date(retention_str)
-            # Start granular partitions from the retention date
-            start_dt = self.truncate_date(retention_date, period)
-            # Create a catch-all for anything older
-            p_archive_ts = int(start_dt.timestamp())
-        else:
-            # Default 'db_min' strategy
-            self.logger.info("Strategy 'db_min': Querying table for minimum clock (may be slow)")
-            min_clock = self.get_table_min_clock(table)
-            
-            if not min_clock:
-                # Empty table. Start from NOW
-                start_dt = self.truncate_date(datetime.now(), period)
-            else:
-                 # Table has data. 
-                 start_dt = self.truncate_date(min_clock, period)
-        
-        # Build list of partitions from start_dt up to NOW + premake
+    def _generate_init_sql(self, table: str, period: str, start_dt: datetime, premake: int, p_archive_ts: int = None):
+        """Generate and execute ALTER TABLE command."""
         target_dt = self.get_next_date(self.truncate_date(datetime.now(), period), period, premake)
         
-        curr = start_dt
-        partitions_def = {}
-        
-        # If we have an archive partition, add it first
-        if p_archive_ts:
-             partitions_def['p_archive'] = str(p_archive_ts)
-
-        while curr < target_dt:
-            name = self.get_partition_name(curr, period)
-            desc = self.get_partition_description(curr, period)
-            partitions_def[name] = desc
-            curr = self.get_next_date(curr, period, 1)
-            
-        # Re-doing the loop to be cleaner on types
         parts_sql = []
         
-        # 1. Archive Partition
         if p_archive_ts:
              parts_sql.append(f"PARTITION p_archive VALUES LESS THAN ({p_archive_ts}) ENGINE = InnoDB")
         
-        # 2. Granular Partitions
-        # We need to iterate again from start_dt
         curr = start_dt
         while curr < target_dt:
             name = self.get_partition_name(curr, period)
-            desc_date_str = self.get_partition_description(curr, period) # Returns "YYYY-MM-DD HH:MM:SS"
+            desc_date_str = self.get_partition_description(curr, period)
             parts_sql.append(PARTITION_TEMPLATE % (name, desc_date_str))
             curr = self.get_next_date(curr, period, 1)
             
+        if not parts_sql:
+             self.logger.warning(f"No partitions generated for {table}")
+             return
+
         query = f"ALTER TABLE `{table}` PARTITION BY RANGE (`clock`) (\n" + ",\n".join(parts_sql) + "\n)"
         self.logger.info(f"Applying initial partitioning to {table} ({len(parts_sql)} partitions)")
         self.execute_query(query)
+
+    def _get_configured_tables(self) -> List[str]:
+        """Return a list of all tables configured for partitioning."""
+        tables_set = set()
+        partitions_conf = self.config.get('partitions', {})
+        for tables in partitions_conf.values():
+            if not tables: continue
+            for item in tables:
+                tables_set.add(list(item.keys())[0])
+        return list(tables_set)
+
+    def clean_housekeeper_table(self):
+        """
+        Clean up Zabbix housekeeper table during initialization.
+        Removes pending tasks ONLY for configured tables to prevent conflicts.
+        """
+        configured_tables = self._get_configured_tables()
+        if not configured_tables:
+            return
+
+        self.logger.info(f"Cleaning up 'housekeeper' table for: {', '.join(configured_tables)}")
+        
+        # Construct IN clause
+        placeholders = ', '.join(['%s'] * len(configured_tables))
+        query = f"DELETE FROM `housekeeper` WHERE `tablename` IN ({placeholders})"
+        self.execute_query(query, configured_tables)
+
+    def check_housekeeper_execution(self):
+        """
+        Check if Zabbix internal housekeeper is running for configured partitioned tables.
+        """
+        configured_tables = self._get_configured_tables()
+        if not configured_tables: 
+            return
+
+        query = "SELECT DISTINCT `tablename` FROM `housekeeper` WHERE `tablename` != 'events'"
+        rows = self.execute_query(query, fetch='all')
+        
+        if rows:
+            found_tables = {r[0] for r in rows}
+            configured_set = set(configured_tables)
+            conflicts = found_tables.intersection(configured_set)
+            
+            if conflicts:
+                self.logger.error(f"CRITICAL: Found pending housekeeper tasks for partitioned tables: {', '.join(conflicts)}")
+                self.logger.error("Please DISABLE Zabbix internal housekeeper for these tables in Administration -> General -> Housekeeping!")
+
+    def initialize_partitioning_fast(self, table: str, period: str, premake: int, retention_str: str):
+        """Fast Init: Use retention period to determine start date."""
+        self.logger.info(f"Initializing partitioning for {table} (Fast Mode)")
+        if not self._check_init_prerequisites(table): return
+        
+        self.logger.info(f"Strategy 'fast-init': Calculating start date from retention ({retention_str})")
+        retention_date = self.get_lookback_date(retention_str)
+        start_dt = self.truncate_date(retention_date, period)
+        p_archive_ts = int(start_dt.timestamp())
+        
+        self._generate_init_sql(table, period, start_dt, premake, p_archive_ts)
+
+    def initialize_partitioning_scan(self, table: str, period: str, premake: int):
+        """Scan Init: Scan table for minimum clock value."""
+        self.logger.info(f"Initializing partitioning for {table} (Scan Mode)")
+        if not self._check_init_prerequisites(table): return
+
+        self.logger.info("Strategy 'db_min': Querying table for minimum clock (may be slow)")
+        min_clock = self.get_table_min_clock(table)
+        
+        if not min_clock:
+            start_dt = self.truncate_date(datetime.now(), period)
+        else:
+             start_dt = self.truncate_date(min_clock, period)
+             
+        self._generate_init_sql(table, period, start_dt, premake)
 
     def discovery(self):
         """Output Zabbix Low-Level Discovery logic JSON."""
@@ -553,10 +607,6 @@ class ZabbixPartitioner:
                 self.discovery()
                 return
 
-            # --- Check Mode (Legacy Removed) ---
-            # Use --stats instead for monitoring
-
-
             # --- Stats Mode ---
             if mode == 'stats':
                 if not target_table:
@@ -570,6 +620,11 @@ class ZabbixPartitioner:
             self.check_compatibility()
             premake = self.config.get('premake', 10)
             
+            if mode == 'init':
+                self.clean_housekeeper_table()
+            else:
+                self.check_housekeeper_execution()
+            
             for period, tables in partitions_conf.items():
                 if not tables:
                     continue
@@ -578,12 +633,24 @@ class ZabbixPartitioner:
                      table = list(item.keys())[0]
                      retention = item[table]
                      
+                     if not self.validate_table_exists(table):
+                         continue
+                     
                      if mode == 'init':
-                         self.initialize_partitioning(table, period, premake, retention, fast_init=self.fast_init)
+                         try:
+                             if self.fast_init:
+                                 self.initialize_partitioning_fast(table, period, premake, retention)
+                             else:
+                                 self.initialize_partitioning_scan(table, period, premake)
+                         except ConfigurationError as e:
+                             raise ConfigurationError(f"Table '{table}': {e}")
                      else:
                          # Maintenance mode (Add new, remove old)
-                         self.create_future_partitions(table, period, premake)
-                         self.remove_old_partitions(table, retention)
+                         try:
+                             self.create_future_partitions(table, period, premake)
+                             self.remove_old_partitions(table, retention)
+                         except ConfigurationError as e:
+                             raise ConfigurationError(f"Table '{table}': {e}")
             
             # Housekeeping extras
             if mode != 'init' and not self.dry_run:
@@ -591,6 +658,31 @@ class ZabbixPartitioner:
 
             if mode != 'init' and not self.dry_run:
                 pass 
+
+def get_retention_input(prompt: str, default: str = None, allow_empty: bool = False) -> str:
+    """Helper to get and validate retention period input."""
+    while True:
+        val = input(prompt).strip()
+        
+        # Handle Empty Input
+        if not val:
+            if default:
+                return default
+            if allow_empty:
+                return ""
+            # If no default and not allow_empty, continue loop
+            continue
+            
+        # Handle Unit-less Input (Reject)
+        if val.isdigit():
+             print(f"Error: '{val}' is missing a unit. Please use 'd', 'w', 'm', or 'y' (e.g., {val}d).")
+             continue
+        
+        # Validate Format
+        if re.search(PART_PERIOD_REGEX, val):
+            return val
+            
+        print("Invalid format. Use format like 30d, 12w, 1y.")
 
 def run_wizard():
     print("Welcome to Zabbix Partitioning Wizard")
@@ -622,11 +714,26 @@ def run_wizard():
     config['database']['passwd'] = input("Database Password: ").strip()
     config['database']['db'] = input("Database Name [zabbix]: ").strip() or 'zabbix'
 
+    # 1.1 SSL
+    if input("Use SSL/TLS for connection? [y/N]: ").lower().strip() == 'y':
+         print("  Mode 1: Managed/Cloud DB (Use system CAs, e.g. Azure/AWS)")
+         print("  Mode 2: Custom Certificates (Provide ca, cert, key)")
+         
+         if input("  Use custom certificates? [y/N]: ").lower().strip() == 'y':
+             ssl_conf = {}
+             ssl_conf['ca'] = input("    CA Certificate Path: ").strip()
+             ssl_conf['cert'] = input("    Client Certificate Path: ").strip()
+             ssl_conf['key'] = input("    Client Key Path: ").strip()
+             # Filter empty
+             config['database']['ssl'] = {k: v for k, v in ssl_conf.items() if v}
+         else:
+             config['database']['ssl'] = 'required'
+
     # 2. Auditlog
     print("\n[Auditlog]")
     print("Note: To partition 'auditlog', ensure its Primary Key includes the 'clock' column.")
     if input("Partition 'auditlog' table? [y/N]: ").lower().strip() == 'y':
-        ret = input("Auditlog retention (e.g. 365d) [365d]: ").strip() or '365d'
+        ret = get_retention_input("Auditlog retention (e.g. 365d) [365d]: ", "365d")
         config['partitions']['weekly'].append({'auditlog': ret})
 
     # 3. History Tables
@@ -636,12 +743,12 @@ def run_wizard():
     print("\n[History Tables]")
     # Separate logic as requested
     if input("Set SAME retention for all history tables? [Y/n]: ").lower().strip() != 'n':
-        ret = input("Retention for all history tables (e.g. 30d) [30d]: ").strip() or '30d'
+        ret = get_retention_input("Retention for all history tables (e.g. 30d) [30d]: ", "30d")
         for t in history_tables:
             config['partitions']['daily'].append({t: ret})
     else:
         for t in history_tables:
-            ret = input(f"Retention for '{t}' (e.g. 30d, skip to ignore): ").strip()
+            ret = get_retention_input(f"Retention for '{t}' (e.g. 30d, skip to ignore): ", allow_empty=True)
             if ret:
                 config['partitions']['daily'].append({t: ret})
 
@@ -649,12 +756,12 @@ def run_wizard():
     trends_tables = ['trends', 'trends_uint']
     print("\n[Trends Tables]")
     if input("Set SAME retention for all trends tables? [Y/n]: ").lower().strip() != 'n':
-        ret = input("Retention for all trends tables (e.g. 365d) [365d]: ").strip() or '365d'
+        ret = get_retention_input("Retention for all trends tables (e.g. 365d) [365d]: ", "365d")
         for t in trends_tables:
             config['partitions']['monthly'].append({t: ret})
     else:
         for t in trends_tables:
-            ret = input(f"Retention for '{t}' (e.g. 365d, skip to ignore): ").strip()
+            ret = get_retention_input(f"Retention for '{t}' (e.g. 365d, skip to ignore): ", allow_empty=True)
             if ret:
                 config['partitions']['monthly'].append({t: ret})
 
@@ -709,15 +816,18 @@ def setup_logging(config_log_type: str, verbose: bool = False):
 
 def parse_args():
     parser = argparse.ArgumentParser(
-        description='Zabbix Database Partitioning Management',
+        description='Zabbix Database Partitioning Script',
         epilog='''
 Examples:
-  # 1. Interactive Configuration (Beginner)
+  # 1. Interactive Configuration (Initial config file creation)
   %(prog)s --wizard
 
   # 2. Initialization (First Run)
-  #    Use --fast-init to skip slow table scans on large DBs.
-  %(prog)s --init --fast-init
+  #    A. Standard (Scans DB for oldest record - Recommended):
+  %(prog)s --init
+  
+  #    B. Fast (Start from retention period - Best for large DBs):
+  %(prog)s --fast-init
 
   # 3. Regular Maintenance (Cron/Systemd)
   #    Creates future partitions and drops old ones.
@@ -730,19 +840,18 @@ Examples:
         formatter_class=argparse.RawDescriptionHelpFormatter
     )
     parser.add_argument('--config','-c', default='/etc/zabbix/zabbix_partitioning.conf', help='Path to configuration file')
-    parser.add_argument('--init', '-i', action='store_true', help='Initialize partitions (Convert standard tables)')
-    parser.add_argument('--dry-run', '-r', action='store_true', help='Simulate queries without executing them')
-    parser.add_argument('--verbose', '-v', action='store_true', help='Enable debug logging')
     
-    # Monitoring args
-    parser.add_argument('--discovery', action='store_true', help='Output Zabbix Low-Level Discovery (LLD) JSON (Required for template)')
-    parser.add_argument('--stats', type=str, help='Output table statistics (Size, Count, Usage) in JSON', metavar='TABLE')
-    
-    # Wizard & Flags
-    parser.add_argument('--wizard', action='store_true', help='Launch interactive configuration wizard')
-    parser.add_argument('--fast-init', action='store_true', help='Skip MIN(clock) check during init (Start from retention period)')
-    
+    # Mutually Exclusive Actions
+    group = parser.add_mutually_exclusive_group()
+    group.add_argument('--init', '-i', action='store_true', help='Initialize partitions (Standard: Scans DB for oldest record)')
+    group.add_argument('--fast-init', '-f', action='store_true', help='Initialize partitions (Fast: Starts FROM retention period, skips scan)')
+    group.add_argument('--discovery', '-d', action='store_true', help='Output Zabbix Low-Level Discovery (LLD) JSON')
+    group.add_argument('--stats', '-s', type=str, help='Output table statistics (Size, Count, Usage) in JSON', metavar='TABLE')
+    group.add_argument('--wizard', '-w', action='store_true', help='Launch interactive configuration wizard')
+
     parser.add_argument('--version', '-V', action='version', version=f'%(prog)s {VERSION}', help='Show version and exit')
+    parser.add_argument('--verbose', '-vv', action='store_true', help='Enable debug logging')
+    parser.add_argument('--dry-run', '-r', action='store_true', help='Simulate queries without executing them')
     
     return parser.parse_args()
 
@@ -780,10 +889,13 @@ def main():
         elif args.stats:
             mode = 'stats'
             target = args.stats
-        elif args.init: mode = 'init'
+        elif args.init: 
+            mode = 'init'
+        elif args.fast_init:
+            mode = 'init'
         
         # Setup logging
-        if mode in ['discovery', 'check', 'stats']:
+        if mode in ['discovery', 'stats']:
              logging.basicConfig(level=logging.ERROR) # Only show critical errors
         else:
              setup_logging(config.get('logging', 'console'), verbose=args.verbose)

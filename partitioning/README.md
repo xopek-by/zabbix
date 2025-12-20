@@ -104,8 +104,8 @@ partitions:
 | Argument | Description |
 |---|---|
 | `-c`, `--config FILE` | Path to configuration file (Default: `/etc/zabbix/zabbix_partitioning.conf`) |
-| `-i`, `--init` | Initialize partitions (converts tables). |
-| `--fast-init` | Skip slow table scan during initialization. Starts from retention period. |
+| `-i`, `--init` | Initialize partitions (Standard Mode: Scan Table). |
+| `-f`, `--fast-init` | Initialize partitions (Fast Mode: Skip Scan, use Retention). |
 | `--wizard` | Launch interactive configuration wizard. |
 | `-r`, `--dry-run` | Simulate queries without executing. Logs expected actions (Safe mode). |
 | `-v`, `--verbose` | Enable debug logging (DEBUG level). |
@@ -136,9 +136,12 @@ This step converts existing standard tables into partitioned tables.
     ```
 
 2.  **Execute Initialization**:
+    > [!WARNING]
+    > For large databases, standard initialization may take **SEVERAL HOURS** and require significant disk space (approx 2x table size).
+
     There are two strategies for initialization:
 
-    **A. Standard Initialization (Default)**:
+    **A. Standard Initialization (`--init`)**:
     Scans the database to find the oldest record (`MIN(clock)`) and creates partitions from that point forward.
     *Best for smaller databases or when you need to retain ALL existing data.*
     ```bash
@@ -150,21 +153,21 @@ This step converts existing standard tables into partitioned tables.
     It creates a single catch-all `p_archive` partition for all data older than the retention start date, then creates granular partitions forward.
     *Recommended for large databases to avoid long table locks/scans.*
     ```bash
-    /opt/zabbix_partitioning/zabbix_partitioning.py --init --fast-init
+    /opt/zabbix_partitioning/zabbix_partitioning.py --fast-init
     ```
 
 ---
 
 ## 7. Automation (Cron Job)
-Set up a daily cron job to create new partitions and remove old ones.
+Set up a cron job to create new partitions and remove old ones.
 
 1.  Open crontab:
     ```bash
     crontab -e
     ```
-2.  Add the line (run daily at 00:30):
+2.  Add the line (run twice a day at 00:10 and 04:10):
     ```cron
-    30 0 * * * /usr/bin/python3 /opt/zabbix_partitioning/zabbix_partitioning.py -c /etc/zabbix/zabbix_partitioning.conf >> /var/log/zabbix_partitioning.log 2>&1
+    10 0,4 * * * /usr/bin/python3 /opt/zabbix_partitioning/zabbix_partitioning.py -c /etc/zabbix/zabbix_partitioning.conf >> /var/log/zabbix_partitioning.log 2>&1
     ```
 
 ---
@@ -187,10 +190,10 @@ Alternatively, use systemd timers for more robust scheduling and logging.
 2.  **Create Timer Unit** (`/etc/systemd/system/zabbix-partitioning.timer`):
     ```ini
     [Unit]
-    Description=Run Zabbix Partitioning Daily
+    Description=Run Zabbix Partitioning twice a day
 
     [Timer]
-    OnCalendar=*-*-* 00:30:00
+    OnCalendar=*-*-* 00:10:00 *-*-* 04:10:00
     Persistent=true
 
     [Install]

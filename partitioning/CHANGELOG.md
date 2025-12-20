@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.0] - 2025-12-20
+### Added
+- **SSL**: Added support for simplified SSL configuration (`ssl: required`) for Managed/Cloud databases and updated Wizard/Config.
+- **Safety**: Added automatic cleanup of `housekeeper` table during init (targeted) and conflict detection during maintenance.
+- **CLI**: Added short flags for all arguments (`-vv`, `-f`, `-d`, `-s`, `-w`).
+- **Validation**: Enforced strict unit validation for retention periods and strict table existence checks.
+- **Error Handling**: Improved error reporting used to identify specific tables causing configuration errors.
+
+### Changed
+- **CLI**: Refactored `--init` and `--fast-init` into mutually exclusive standalone commands (Breaking Change).
+- **CLI**: Reorganized argument parsing logic for better maintainability.
+- **Safety**: Updated initialization warnings to explicitly mention duration ("SEVERAL HOURS") and disk space requirements.
+- **Logic**: Refined housekeeper conflict check to only warn about tables actively configured for partitioning.
+
 ## [0.5.0] - 2025-12-16
 ### Added
 - **Wizard**: Added interactive configuration wizard (`--wizard`).
